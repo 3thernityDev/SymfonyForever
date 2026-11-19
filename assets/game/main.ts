@@ -77,6 +77,7 @@ class SymfonyForeverGame {
   private readonly npcs = new Map<string, NpcEntry>();
   private readonly seenEventIds = new Set<number>();
   private readonly notifiedReadyQuests = new Set<string>();
+  private lastQuestSignature = '';
 
   private lastEventId = 0;
   private lastChatId = 0;
@@ -1205,6 +1206,9 @@ class SymfonyForeverGame {
   }
 
   private applyQuestState(quests: QuestStatePayload, isFirst: boolean): void {
+    const signature = JSON.stringify(quests);
+    const changed = signature !== this.lastQuestSignature;
+    this.lastQuestSignature = signature;
     this.questState = quests;
 
     for (const q of quests.active) {
@@ -1217,9 +1221,11 @@ class SymfonyForeverGame {
       }
     }
 
-    this.updateQuestTracker();
-    if (this.activeNpcModalCode !== null) {
-      this.renderNpcModalContent(this.activeNpcModalCode);
+    if (changed) {
+      this.updateQuestTracker();
+      if (this.activeNpcModalCode !== null) {
+        this.renderNpcModalContent(this.activeNpcModalCode);
+      }
     }
   }
 

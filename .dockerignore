@@ -10,3 +10,4 @@ tests
 .env.*.local
 phpunit.xml
 compose*.yaml
+assets/game/3D

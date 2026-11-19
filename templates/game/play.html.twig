@@ -99,7 +99,7 @@
     }
 
     /* Bottom-center: Action bar + XP */
-    .hud-bottom-center { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: 470px; max-width: calc(100vw - 24px); padding: 10px 12px; }
+    .hud-bottom-center { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: 440px; max-width: calc(100vw - 24px); padding: 10px 12px; z-index: 26; }
     .skills-bar { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 8px; align-items: stretch; }
     .skill-btn {
         position: relative; overflow: hidden; border-radius: 10px;
@@ -133,14 +133,14 @@
     .xp-text { position: absolute; inset: 0; font-size: 9px; display: flex; align-items: center; justify-content: center; font-weight: 700; text-shadow: 0 1px 2px #000; }
 
     /* Bottom-left: Chat */
-    .hud-chat { position: absolute; bottom: 14px; left: 14px; width: 320px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .hud-chat { position: absolute; bottom: 14px; left: 14px; width: 290px; padding: 8px; display: flex; flex-direction: column; gap: 6px; z-index: 22; }
     .chat-tabs { display: flex; gap: 4px; }
     .chat-tab {
         flex: 1; padding: 3px 6px; border-radius: 6px; border: 1px solid transparent;
         background: rgba(255,255,255,0.05); color: var(--text-muted); cursor: pointer; font-size: 11px;
     }
     .chat-tab.active { background: rgba(20, 184, 166, 0.25); border-color: rgba(94,234,212,0.5); color: #fff; }
-    .chat-log { height: 132px; overflow-y: auto; font-size: 12px; line-height: 1.38; padding-right: 4px; }
+    .chat-log { height: 116px; overflow-y: auto; font-size: 12px; line-height: 1.38; padding-right: 4px; }
     .chat-line { margin-bottom: 3px; word-break: break-word; }
     .chat-form { display: flex; gap: 5px; }
     .chat-form input {
@@ -151,7 +151,12 @@
     /* Bottom-right: Controls hint */
     .hud-controls {
         position: absolute; bottom: 14px; right: 14px; padding: 8px 10px;
-        font-size: 11px; color: var(--text-muted); line-height: 1.5; max-width: 240px;
+        font-size: 11px; color: var(--text-muted); line-height: 1.5; max-width: 225px; z-index: 22;
+    }
+    @media (max-width: 1100px) {
+        .hud-chat { bottom: 126px; width: 250px; }
+        .chat-log { height: 84px; }
+        .hud-controls { display: none; }
     }
     .hud-controls kbd {
         background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);

@@ -118,7 +118,7 @@ if (panel && canvas && hiddenInput) {
     const t = clock.elapsedTime;
     if (currentAvatar) {
       currentAvatar.group.rotation.y = t * 0.65;
-      animateAvatar(currentAvatar, dt, false, false, t);
+      animateAvatar(currentAvatar, dt, currentAvatar.fbxRoot !== null, false, t);
     }
     renderer.render(scene, camera);
   };

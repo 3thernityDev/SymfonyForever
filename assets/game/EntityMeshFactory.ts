@@ -1,15 +1,20 @@
 import * as THREE from 'three';
+import { instantiateTikafRig } from './ModelAssetCache';
 import type { ClassCode } from './types';
 
 export interface AnimatedAvatar {
   group: THREE.Group;
   body: THREE.Group;
+  proceduralRoot: THREE.Group;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
   leftLeg: THREE.Object3D;
   rightLeg: THREE.Object3D;
   targetRing: THREE.Mesh;
   attackTimer: number;
+  fbxRoot: THREE.Group | null;
+  fbxMixer: THREE.AnimationMixer | null;
+  fbxWalkAction: THREE.AnimationAction | null;
 }
 
 const mat = (color: number | string, roughness = 0.65, metalness = 0.15, emissive?: number | string) =>
@@ -25,6 +30,8 @@ const mat = (color: number | string, roughness = 0.65, metalness = 0.15, emissiv
 export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
   const group = new THREE.Group();
   const body = new THREE.Group();
+  const proceduralRoot = new THREE.Group();
+  body.add(proceduralRoot);
   group.add(body);
 
   const skinMat = mat(0xd49b72, 0.7, 0.05);
@@ -45,14 +52,14 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
   const rightLeg = new THREE.Mesh(legGeo, darkMat);
   rightLeg.position.set(0.22, 0.48, 0);
   rightLeg.castShadow = true;
-  body.add(leftLeg, rightLeg);
+  proceduralRoot.add(leftLeg, rightLeg);
 
   // Torso
   const torsoWidth = classCode === 'TANK' ? 1.0 : 0.78;
   const torso = new THREE.Mesh(new THREE.BoxGeometry(torsoWidth, 1.05, 0.52), mat(pal.main, 0.55, 0.3));
   torso.position.y = 1.45;
   torso.castShadow = true;
-  body.add(torso);
+  proceduralRoot.add(torso);
 
   // Shoulder pauldrons for Tank / DPS
   if (classCode === 'TANK') {
@@ -61,25 +68,25 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     pL.position.set(-0.62, 1.85, 0);
     const pR = pL.clone();
     pR.position.x = 0.62;
-    body.add(pL, pR);
+    proceduralRoot.add(pL, pR);
   } else if (classCode === 'DPS') {
     // Volcanic scarf / cape
     const cape = new THREE.Mesh(new THREE.BoxGeometry(0.75, 1.15, 0.08), mat(0x271313, 0.85, 0.05));
     cape.position.set(0, 1.32, -0.32);
     cape.rotation.x = 0.14;
-    body.add(cape);
+    proceduralRoot.add(cape);
   } else {
     // Heal lower robe flare
     const robe = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.58, 0.9, 7), mat(pal.main, 0.7, 0.1));
     robe.position.y = 0.72;
-    body.add(robe);
+    proceduralRoot.add(robe);
   }
 
   // Head
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.54, 0.54), skinMat);
   head.position.y = 2.28;
   head.castShadow = true;
-  body.add(head);
+  proceduralRoot.add(head);
 
   // Headgear per class
   if (classCode === 'TANK') {
@@ -87,16 +94,16 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     helm.position.y = 2.45;
     const visor = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.1, 0.12), mat(pal.glow, 0.2, 0.4, pal.glow));
     visor.position.set(0, 2.34, 0.28);
-    body.add(helm, visor);
+    proceduralRoot.add(helm, visor);
   } else if (classCode === 'DPS') {
     const hood = new THREE.Mesh(new THREE.ConeGeometry(0.45, 0.52, 6), mat(0x7c2d12, 0.75, 0.1));
     hood.position.set(0, 2.68, -0.04);
-    body.add(hood);
+    proceduralRoot.add(hood);
   } else {
     const crown = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.06, 6, 12), mat(pal.trim, 0.4, 0.3, pal.glow));
     crown.rotation.x = Math.PI / 2;
     crown.position.y = 2.6;
-    body.add(crown);
+    proceduralRoot.add(crown);
   }
 
   // Arms + class weapons
@@ -129,7 +136,7 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     hammerHead.position.set(0, -0.68, 1.0);
     rightArm.add(handle, hammerHead);
   } else if (classCode === 'DPS') {
-    // Dual Lava Blades!
+    // Dual Lava Blades (shown as placeholder while Tikaf.fbx streams in)
     const bladeGeo = new THREE.BoxGeometry(0.1, 0.16, 1.3);
     const bladeMat = mat(0xf97316, 0.25, 0.5, 0xea580c);
     const bladeL = new THREE.Mesh(bladeGeo, bladeMat);
@@ -147,7 +154,7 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     rightArm.add(staff, crystal);
   }
 
-  body.add(leftArm, rightArm);
+  proceduralRoot.add(leftArm, rightArm);
 
   // Selection ring under feet
   const targetRing = new THREE.Mesh(
@@ -159,7 +166,40 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
   targetRing.visible = false;
   group.add(targetRing);
 
-  return { group, body, leftArm, rightArm, leftLeg, rightLeg, targetRing, attackTimer: 0 };
+  const avatar: AnimatedAvatar = {
+    group,
+    body,
+    proceduralRoot,
+    leftArm,
+    rightArm,
+    leftLeg,
+    rightLeg,
+    targetRing,
+    attackTimer: 0,
+    fbxRoot: null,
+    fbxMixer: null,
+    fbxWalkAction: null,
+  };
+
+  // Attach custom animated 3D Tikaf.fbx model to the DPS class!
+  if (classCode === 'DPS') {
+    void instantiateTikafRig()
+      .then((rig) => {
+        rig.root.traverse((obj) => {
+          obj.userData = group.userData;
+        });
+        body.add(rig.root);
+        proceduralRoot.visible = false;
+        avatar.fbxRoot = rig.root;
+        avatar.fbxMixer = rig.mixer;
+        avatar.fbxWalkAction = rig.walkAction;
+      })
+      .catch((err) => {
+        console.warn('Impossible de charger Tikaf.fbx, fallback procédural actif :', err);
+      });
+  }
+
+  return avatar;
 }
 
 export function animateAvatar(avatar: AnimatedAvatar, dt: number, isMoving: boolean, isDead: boolean, time: number): void {
@@ -169,7 +209,50 @@ export function animateAvatar(avatar: AnimatedAvatar, dt: number, isMoving: bool
     return;
   }
 
+  // Custom FBX SkinnedMesh animation path (Tikaf for DPS)
+  if (avatar.fbxRoot) {
+    let targetTiltX = isMoving ? 0.08 : 0.0;
+    let targetLungeZ = 0.0;
+
+    if (avatar.fbxMixer && avatar.fbxWalkAction) {
+      if (isMoving) {
+        avatar.fbxWalkAction.paused = false;
+        avatar.fbxMixer.update(dt * 1.15);
+      } else {
+        // Smoothly settle back toward standing neutral frame when idle
+        const clipLen = avatar.fbxWalkAction.getClip().duration || 1;
+        const cur = avatar.fbxWalkAction.time % clipLen;
+        if (cur > 0.03 && cur < clipLen - 0.03) {
+          avatar.fbxWalkAction.paused = false;
+          avatar.fbxMixer.update(dt * 1.4);
+        } else {
+          avatar.fbxWalkAction.time = 0;
+          avatar.fbxWalkAction.paused = true;
+          avatar.fbxMixer.update(0);
+        }
+      }
+    }
+
+    if (avatar.attackTimer > 0) {
+      avatar.attackTimer = Math.max(0, avatar.attackTimer - dt);
+      const phase = Math.sin((avatar.attackTimer / 0.4) * Math.PI);
+      targetTiltX = 0.32 * phase;
+      targetLungeZ = 0.65 * phase;
+      if (avatar.fbxMixer && avatar.fbxWalkAction) {
+        avatar.fbxWalkAction.paused = false;
+        avatar.fbxMixer.update(dt * 2.2);
+      }
+    }
+
+    avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, targetTiltX, Math.min(1, dt * 14));
+    avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, targetLungeZ, Math.min(1, dt * 16));
+    avatar.body.position.y = isMoving ? 0 : Math.sin(time * 2.4) * 0.03;
+    return;
+  }
+
+  // Procedural low-poly animation path (Tank & Heal)
   avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, 0, Math.min(1, dt * 10));
+  avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, 0, Math.min(1, dt * 12));
 
   if (isMoving) {
     const swing = Math.sin(time * 10.5) * 0.65;
