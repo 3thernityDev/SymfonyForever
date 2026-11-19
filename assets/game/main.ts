@@ -172,7 +172,12 @@ class SymfonyForeverGame {
       this.initThree();
       this.worldRenderer = new ReunionWorldRenderer(this.scene, this.sampler, this.manifest.landmarks);
       this.vfx = new VfxManager(this.scene, this.floatingLayer);
-      this.controller = new PlayerController(this.canvas, this.sampler);
+      this.controller = new PlayerController(
+        this.canvas,
+        this.sampler,
+        this.manifest.world.walkSpeed ?? 6.0,
+        this.manifest.world.sprintSpeed ?? 11.5,
+      );
 
       this.selfAvatar = createPlayerAvatar(this.classCode);
       this.scene.add(this.selfAvatar.group);
@@ -220,7 +225,7 @@ class SymfonyForeverGame {
 
   private initThree(): void {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 1800);
+    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 3200);
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));

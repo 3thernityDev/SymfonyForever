@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service\Game;
 
+use App\Entity\Character;
 use App\Entity\MonsterInstance;
 use App\Entity\MonsterTemplate;
 use App\Entity\Zone;
@@ -110,8 +111,31 @@ final class WorldSeederService
         }
         $this->em->flush();
 
-        // 3. Seed monster instances across La Réunion if empty (or reset requested)
+        // 3. Detect legacy 2048-scale database so existing worlds migrate cleanly to 7168-scale coordinates
         $existingCount = $this->instanceRepository->count([]);
+        if ($existingCount > 0 && !$resetMonsters) {
+            foreach ($this->instanceRepository->findAll() as $inst) {
+                if ($inst->getTemplate()->isWorldBoss() && $inst->getSpawnX() < 1000.0) {
+                    $resetMonsters = true;
+                    break;
+                }
+            }
+            if ($resetMonsters) {
+                // Remove old-scale bots & relocate existing human characters to their zone's new respawn point
+                $this->em->createQuery('DELETE FROM App\Entity\Character c WHERE c.isBot = true')->execute();
+                $zonesMeta = WorldCatalog::zones();
+                /** @var list<Character> $humans */
+                $humans = $this->em->createQuery('SELECT c FROM App\Entity\Character c WHERE c.isBot = false')->getResult();
+                foreach ($humans as $human) {
+                    $zMeta = $zonesMeta[$human->getZoneCode()] ?? $zonesMeta['lagon_ouest'];
+                    $safe = $this->terrainService->findNearestWalkable($zMeta['respawnX'], $zMeta['respawnZ']);
+                    $human->setPosX($safe['x'])
+                        ->setPosY($safe['y'])
+                        ->setPosZ($safe['z']);
+                }
+            }
+        }
+
         if ($resetMonsters && $existingCount > 0) {
             $this->em->createQuery('DELETE FROM App\Entity\MonsterInstance')->execute();
             $existingCount = 0;
@@ -119,70 +143,127 @@ final class WorldSeederService
 
         $spawned = 0;
         if ($existingCount === 0) {
-            // [templateCode, zoneCode, x, z]
+            // [templateCode, zoneCode, x, z] across the enlarged 7168 x 7168 Réunion island (~105 creatures)
             $spawns = [
-                // Lagon de l'Ouest (autour du camp de Saint-Gilles -585, -95 — facile à trouver immédiatement!)
-                ['crabe_recif', 'lagon_ouest', -550.0, -70.0],
-                ['crabe_recif', 'lagon_ouest', -540.0, -115.0],
-                ['crabe_recif', 'lagon_ouest', -615.0, -45.0],
-                ['crabe_recif', 'lagon_ouest', -570.0, -35.0],
-                ['crabe_recif', 'lagon_ouest', -525.0, -90.0],
-                ['tangue_sauvage', 'lagon_ouest', -495.0, -60.0],
-                ['tangue_sauvage', 'lagon_ouest', -480.0, -125.0],
-                ['tangue_sauvage', 'lagon_ouest', -515.0, -155.0],
-                ['tangue_sauvage', 'lagon_ouest', -545.0, 20.0],
-                ['guepe_cotiere', 'lagon_ouest', -440.0, -165.0],
-                ['guepe_cotiere', 'lagon_ouest', -460.0, 45.0],
-                ['guepe_cotiere', 'lagon_ouest', -420.0, -75.0],
+                // Lagon de l'Ouest (~24 mobs: starter beach crabs + tangues + coastal wasps along trails)
+                ['crabe_recif', 'lagon_ouest', -2005.0, -305.0],
+                ['crabe_recif', 'lagon_ouest', -1985.0, -345.0],
+                ['crabe_recif', 'lagon_ouest', -2085.0, -275.0],
+                ['crabe_recif', 'lagon_ouest', -2025.0, -265.0],
+                ['crabe_recif', 'lagon_ouest', -1955.0, -320.0],
+                ['crabe_recif', 'lagon_ouest', -1995.0, -230.0],
+                ['crabe_recif', 'lagon_ouest', -1935.0, -385.0],
+                ['crabe_recif', 'lagon_ouest', -2065.0, -220.0],
+                ['tangue_sauvage', 'lagon_ouest', -1900.0, -300.0],
+                ['tangue_sauvage', 'lagon_ouest', -1865.0, -365.0],
+                ['tangue_sauvage', 'lagon_ouest', -1895.0, -425.0],
+                ['tangue_sauvage', 'lagon_ouest', -1935.0, -195.0],
+                ['tangue_sauvage', 'lagon_ouest', -1810.0, -260.0],
+                ['tangue_sauvage', 'lagon_ouest', -1780.0, -380.0],
+                ['tangue_sauvage', 'lagon_ouest', -1855.0, -140.0],
+                ['tangue_sauvage', 'lagon_ouest', -1745.0, -210.0],
+                ['guepe_cotiere', 'lagon_ouest', -1680.0, -450.0],
+                ['guepe_cotiere', 'lagon_ouest', -1730.0, -80.0],
+                ['guepe_cotiere', 'lagon_ouest', -1610.0, -290.0],
+                ['guepe_cotiere', 'lagon_ouest', -1540.0, -520.0],
+                ['guepe_cotiere', 'lagon_ouest', -1660.0, 80.0],
+                ['guepe_cotiere', 'lagon_ouest', -1520.0, -180.0],
+                ['guepe_cotiere', 'lagon_ouest', -1420.0, -410.0],
+                ['guepe_cotiere', 'lagon_ouest', -1490.0, 210.0],
 
-                // Cirque de Salazie
-                ['sanglier_salazie', 'salazie', 65.0, -270.0],
-                ['sanglier_salazie', 'salazie', 120.0, -310.0],
-                ['sanglier_salazie', 'salazie', 80.0, -340.0],
-                ['sanglier_salazie', 'salazie', 150.0, -255.0],
-                ['papangue_feroce', 'salazie', 40.0, -230.0],
-                ['papangue_feroce', 'salazie', 110.0, -220.0],
-                ['papangue_feroce', 'salazie', 160.0, -320.0],
+                // Cirque de Salazie (~15 mobs)
+                ['sanglier_salazie', 'salazie', 250.0, -960.0],
+                ['sanglier_salazie', 'salazie', 390.0, -1080.0],
+                ['sanglier_salazie', 'salazie', 300.0, -1160.0],
+                ['sanglier_salazie', 'salazie', 460.0, -920.0],
+                ['sanglier_salazie', 'salazie', 210.0, -1100.0],
+                ['sanglier_salazie', 'salazie', 505.0, -1010.0],
+                ['sanglier_salazie', 'salazie', 350.0, -880.0],
+                ['sanglier_salazie', 'salazie', 165.0, -990.0],
+                ['papangue_feroce', 'salazie', 190.0, -830.0],
+                ['papangue_feroce', 'salazie', 385.0, -790.0],
+                ['papangue_feroce', 'salazie', 515.0, -1140.0],
+                ['papangue_feroce', 'salazie', 280.0, -1220.0],
+                ['papangue_feroce', 'salazie', 435.0, -860.0],
+                ['papangue_feroce', 'salazie', 145.0, -1040.0],
+                ['papangue_feroce', 'salazie', 490.0, -780.0],
 
-                // Cirque de Mafate
-                ['papangue_feroce', 'mafate', -285.0, -215.0],
-                ['papangue_feroce', 'mafate', -220.0, -270.0],
-                ['golem_schiste', 'mafate', -245.0, -235.0],
-                ['golem_schiste', 'mafate', -275.0, -265.0],
-                ['golem_schiste', 'mafate', -195.0, -220.0],
-                ['golem_schiste', 'mafate', -310.0, -245.0],
+                // Cirque de Mafate (~14 mobs)
+                ['papangue_feroce', 'mafate', -1020.0, -770.0],
+                ['papangue_feroce', 'mafate', -780.0, -950.0],
+                ['papangue_feroce', 'mafate', -1190.0, -810.0],
+                ['papangue_feroce', 'mafate', -640.0, -910.0],
+                ['papangue_feroce', 'mafate', -930.0, -990.0],
+                ['papangue_feroce', 'mafate', -710.0, -730.0],
+                ['golem_schiste', 'mafate', -860.0, -825.0],
+                ['golem_schiste', 'mafate', -960.0, -920.0],
+                ['golem_schiste', 'mafate', -690.0, -780.0],
+                ['golem_schiste', 'mafate', -1090.0, -860.0],
+                ['golem_schiste', 'mafate', -810.0, -900.0],
+                ['golem_schiste', 'mafate', -995.0, -720.0],
+                ['golem_schiste', 'mafate', -600.0, -980.0],
+                ['golem_schiste', 'mafate', -1210.0, -740.0],
 
-                // Cirque de Cilaos
-                ['cerf_java', 'cilaos', -160.0, 125.0],
-                ['cerf_java', 'cilaos', -115.0, 175.0],
-                ['cerf_java', 'cilaos', -185.0, 175.0],
-                ['cerf_java', 'cilaos', -85.0, 130.0],
-                ['gardien_cilaos', 'cilaos', -135.0, 95.0],
-                ['gardien_cilaos', 'cilaos', -105.0, 65.0],
-                ['gardien_cilaos', 'cilaos', -155.0, 195.0],
+                // Cirque de Cilaos (~15 mobs)
+                ['cerf_java', 'cilaos', -560.0, 440.0],
+                ['cerf_java', 'cilaos', -405.0, 610.0],
+                ['cerf_java', 'cilaos', -645.0, 605.0],
+                ['cerf_java', 'cilaos', -310.0, 455.0],
+                ['cerf_java', 'cilaos', -515.0, 725.0],
+                ['cerf_java', 'cilaos', -730.0, 520.0],
+                ['cerf_java', 'cilaos', -235.0, 610.0],
+                ['cerf_java', 'cilaos', -615.0, 345.0],
+                ['gardien_cilaos', 'cilaos', -475.0, 340.0],
+                ['gardien_cilaos', 'cilaos', -365.0, 265.0],
+                ['gardien_cilaos', 'cilaos', -540.0, 680.0],
+                ['gardien_cilaos', 'cilaos', -215.0, 480.0],
+                ['gardien_cilaos', 'cilaos', -690.0, 415.0],
+                ['gardien_cilaos', 'cilaos', -390.0, 750.0],
+                ['gardien_cilaos', 'cilaos', -450.0, 245.0],
 
-                // Sud Sauvage
-                ['lezard_obsidienne', 'sud_sauvage', 145.0, 485.0],
-                ['lezard_obsidienne', 'sud_sauvage', 195.0, 520.0],
-                ['lezard_obsidienne', 'sud_sauvage', 240.0, 470.0],
-                ['lezard_obsidienne', 'sud_sauvage', 105.0, 515.0],
-                ['lezard_obsidienne', 'sud_sauvage', 275.0, 420.0],
+                // Sud Sauvage (~12 mobs)
+                ['lezard_obsidienne', 'sud_sauvage', 505.0, 1690.0],
+                ['lezard_obsidienne', 'sud_sauvage', 680.0, 1815.0],
+                ['lezard_obsidienne', 'sud_sauvage', 840.0, 1645.0],
+                ['lezard_obsidienne', 'sud_sauvage', 370.0, 1795.0],
+                ['lezard_obsidienne', 'sud_sauvage', 960.0, 1480.0],
+                ['lezard_obsidienne', 'sud_sauvage', 210.0, 1580.0],
+                ['lezard_obsidienne', 'sud_sauvage', 585.0, 1890.0],
+                ['lezard_obsidienne', 'sud_sauvage', 765.0, 1735.0],
+                ['lezard_obsidienne', 'sud_sauvage', 435.0, 1560.0],
+                ['lezard_obsidienne', 'sud_sauvage', 910.0, 1830.0],
+                ['lezard_obsidienne', 'sud_sauvage', 175.0, 1465.0],
+                ['lezard_obsidienne', 'sud_sauvage', 640.0, 1545.0],
 
-                // Piton des Neiges
-                ['gardien_cilaos', 'piton_neiges', -95.0, -25.0],
-                ['gardien_cilaos', 'piton_neiges', -45.0, -95.0],
-                ['colosse_nuages', 'piton_neiges', -75.0, -65.0],
-                ['colosse_nuages', 'piton_neiges', -100.0, -85.0],
+                // Piton des Neiges (~10 mobs)
+                ['gardien_cilaos', 'piton_neiges', -335.0, -90.0],
+                ['gardien_cilaos', 'piton_neiges', -160.0, -330.0],
+                ['gardien_cilaos', 'piton_neiges', -410.0, -210.0],
+                ['gardien_cilaos', 'piton_neiges', -95.0, -145.0],
+                ['gardien_cilaos', 'piton_neiges', -290.0, -395.0],
+                ['gardien_cilaos', 'piton_neiges', -195.0, 10.0],
+                ['colosse_nuages', 'piton_neiges', -262.5, -227.5],
+                ['colosse_nuages', 'piton_neiges', -350.0, -295.0],
+                ['colosse_nuages', 'piton_neiges', -170.0, -195.0],
+                ['colosse_nuages', 'piton_neiges', -285.0, -125.0],
 
-                // Plaine des Sables & Piton de la Fournaise
-                ['molosse_magma', 'fournaise', 235.0, 210.0],
-                ['molosse_magma', 'fournaise', 295.0, 235.0],
-                ['molosse_magma', 'fournaise', 355.0, 250.0],
-                ['molosse_magma', 'fournaise', 395.0, 290.0],
-                ['molosse_magma', 'fournaise', 465.0, 240.0],
-                ['molosse_magma', 'fournaise', 420.0, 315.0],
+                // Plaine des Sables & Piton de la Fournaise (~14 mobs + World Boss)
+                ['molosse_magma', 'fournaise', 825.0, 735.0],
+                ['molosse_magma', 'fournaise', 1030.0, 820.0],
+                ['molosse_magma', 'fournaise', 1240.0, 875.0],
+                ['molosse_magma', 'fournaise', 1380.0, 1015.0],
+                ['molosse_magma', 'fournaise', 1620.0, 840.0],
+                ['molosse_magma', 'fournaise', 1470.0, 1105.0],
+                ['molosse_magma', 'fournaise', 560.0, 680.0],
+                ['molosse_magma', 'fournaise', 710.0, 790.0],
+                ['molosse_magma', 'fournaise', 950.0, 695.0],
+                ['molosse_magma', 'fournaise', 1140.0, 765.0],
+                ['molosse_magma', 'fournaise', 1295.0, 960.0],
+                ['molosse_magma', 'fournaise', 1410.0, 800.0],
+                ['molosse_magma', 'fournaise', 1580.0, 1080.0],
+                ['molosse_magma', 'fournaise', 1190.0, 1060.0],
                 // WORLD BOSS au cœur du Cratère Dolomieu!
-                ['seigneur_dolomieu', 'fournaise', 440.0, 275.0],
+                ['seigneur_dolomieu', 'fournaise', 1540.0, 962.5],
             ];
 
             foreach ($spawns as [$tplCode, $zoneCode, $sx, $sz]) {
@@ -206,7 +287,7 @@ final class WorldSeederService
                 }
             }
             if (!$hasWorldBoss && isset($templates['seigneur_dolomieu'])) {
-                $pos = $this->terrainService->findNearestWalkable(440.0, 275.0);
+                $pos = $this->terrainService->findNearestWalkable(1540.0, 962.5);
                 $wb = new MonsterInstance($templates['seigneur_dolomieu'], 'fournaise', $pos['x'], $pos['y'], $pos['z']);
                 $this->em->persist($wb);
                 ++$existingCount;

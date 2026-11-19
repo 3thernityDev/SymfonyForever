@@ -28,10 +28,10 @@ class Zone
     private int $maxLevel = 3;
 
     #[ORM\Column]
-    private float $respawnX = -585.0;
+    private float $respawnX = -2047.5;
 
     #[ORM\Column]
-    private float $respawnZ = -95.0;
+    private float $respawnZ = -332.5;
 
     #[ORM\Column]
     private float $lastTickAt = 0.0;

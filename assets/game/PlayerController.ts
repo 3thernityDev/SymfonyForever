@@ -6,9 +6,9 @@ import { TerrainSampler } from './TerrainSampler';
  * Uses KeyboardEvent.code (KeyW/KeyA/KeyS/KeyD) so AZERTY (ZQSD) and QWERTY (WASD) work identically.
  */
 export class PlayerController {
-  public x = -585;
+  public x = -2047.5;
   public y = 12;
-  public z = -95;
+  public z = -332.5;
   public rotY = 0;
   public isMoving = false;
   public isSprinting = false;
@@ -19,8 +19,6 @@ export class PlayerController {
 
   private vy = 0;
   private isGrounded = true;
-  private readonly walkSpeed = 6.0;
-  private readonly sprintSpeed = 11.5;
   private readonly keys = new Set<string>();
   private draggingCamera = false;
   private lastPointerX = 0;
@@ -30,6 +28,8 @@ export class PlayerController {
   public constructor(
     canvas: HTMLCanvasElement,
     private readonly sampler: TerrainSampler,
+    private readonly walkSpeed = 6.0,
+    private readonly sprintSpeed = 11.5,
   ) {
     window.addEventListener('keydown', (e) => {
       if (this.inputBlocked) return;

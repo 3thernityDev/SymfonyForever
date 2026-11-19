@@ -85,13 +85,13 @@ class Character
     private string $zoneCode = 'lagon_ouest';
 
     #[ORM\Column]
-    private float $posX = -585.0;
+    private float $posX = -2047.5;
 
     #[ORM\Column]
     private float $posY = 12.0;
 
     #[ORM\Column]
-    private float $posZ = -95.0;
+    private float $posZ = -332.5;
 
     #[ORM\Column]
     private float $rotY = 0.0;

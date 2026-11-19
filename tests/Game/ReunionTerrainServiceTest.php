@@ -20,9 +20,9 @@ final class ReunionTerrainServiceTest extends KernelTestCase
 
     public function testOceanOutsideIslandIsUnwalkable(): void
     {
-        self::assertFalse($this->terrain->isWalkable(-980.0, -980.0));
-        self::assertLessThan(WorldCatalog::SEA_LEVEL, $this->terrain->getHeight(-980.0, -980.0));
-        self::assertSame(WorldCatalog::BIOME_OCEAN, $this->terrain->getBiome(-980.0, -980.0));
+        self::assertFalse($this->terrain->isWalkable(-3450.0, -3450.0));
+        self::assertLessThan(WorldCatalog::SEA_LEVEL, $this->terrain->getHeight(-3450.0, -3450.0));
+        self::assertSame(WorldCatalog::BIOME_OCEAN, $this->terrain->getBiome(-3450.0, -3450.0));
     }
 
     public function testSaintGillesHubIsWalkableAndInLagonOuest(): void
@@ -35,25 +35,66 @@ final class ReunionTerrainServiceTest extends KernelTestCase
 
     public function testPitonDesNeigesIsHighestMassif(): void
     {
-        $peakY = $this->terrain->getHeight(-75.0, -65.0);
-        $hubY = $this->terrain->getHeight(-585.0, -95.0);
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $px = WorldCatalog::scaleCoord(-75.0);
+        $pz = WorldCatalog::scaleCoord(-65.0);
+        $peakY = $this->terrain->getHeight($px, $pz);
+        $hubY = $this->terrain->getHeight($hub['respawnX'], $hub['respawnZ']);
 
-        self::assertGreaterThan(130.0, $peakY);
-        self::assertGreaterThan($hubY + 100.0, $peakY);
-        self::assertSame('piton_neiges', $this->terrain->getZoneCode(-75.0, -65.0));
+        self::assertGreaterThan(240.0, $peakY);
+        self::assertGreaterThan($hubY + 200.0, $peakY);
+        self::assertSame('piton_neiges', $this->terrain->getZoneCode($px, $pz));
     }
 
     public function testFournaiseCraterHasVolcanicBiomeAndZone(): void
     {
-        self::assertSame('fournaise', $this->terrain->getZoneCode(440.0, 275.0));
-        self::assertSame(WorldCatalog::BIOME_VOLCANO_LAVA, $this->terrain->getBiome(440.0, 275.0));
+        $cx = WorldCatalog::scaleCoord(440.0);
+        $cz = WorldCatalog::scaleCoord(275.0);
+        self::assertSame('fournaise', $this->terrain->getZoneCode($cx, $cz));
+        self::assertSame(WorldCatalog::BIOME_VOLCANO_LAVA, $this->terrain->getBiome($cx, $cz));
     }
 
     public function testAllSevenZonesAreRepresentedOnIsland(): void
     {
-        self::assertSame('salazie', $this->terrain->getZoneCode(95.0, -290.0));
-        self::assertSame('mafate', $this->terrain->getZoneCode(-250.0, -240.0));
-        self::assertSame('cilaos', $this->terrain->getZoneCode(-130.0, 145.0));
-        self::assertSame('sud_sauvage', $this->terrain->getZoneCode(190.0, 520.0));
+        $zones = WorldCatalog::zones();
+        foreach (['salazie', 'mafate', 'cilaos', 'sud_sauvage'] as $zCode) {
+            self::assertSame($zCode, $this->terrain->getZoneCode($zones[$zCode]['centerX'], $zones[$zCode]['centerZ']));
+        }
+    }
+
+    public function testWorldRequiresAtLeastTenMinutesToCrossOnFoot(): void
+    {
+        self::assertGreaterThanOrEqual(7000.0, WorldCatalog::WORLD_SIZE);
+
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $dolomieuX = WorldCatalog::scaleCoord(440.0);
+        $dolomieuZ = WorldCatalog::scaleCoord(275.0);
+        $hubToBossDist = hypot($dolomieuX - $hub['respawnX'], $dolomieuZ - $hub['respawnZ']);
+        $hubToBossSeconds = $hubToBossDist / WorldCatalog::PLAYER_WALK_SPEED;
+
+        self::assertGreaterThanOrEqual(
+            600.0,
+            $hubToBossSeconds,
+            sprintf('La traversée Saint-Gilles -> Dolomieu doit prendre >= 600s (10 min), mesuré: %.1fs', $hubToBossSeconds),
+        );
+
+        // Scan full walkable island span West -> East across midband Z
+        $minWalkX = INF;
+        $maxWalkX = -INF;
+        for ($z = -500.0; $z <= 500.0; $z += 125.0) {
+            for ($x = -WorldCatalog::HALF_WORLD + 60.0; $x <= WorldCatalog::HALF_WORLD - 60.0; $x += 40.0) {
+                if ($this->terrain->isWalkable($x, $z)) {
+                    $minWalkX = min($minWalkX, $x);
+                    $maxWalkX = max($maxWalkX, $x);
+                }
+            }
+        }
+
+        $coastToCoastSeconds = ($maxWalkX - $minWalkX) / WorldCatalog::PLAYER_WALK_SPEED;
+        self::assertGreaterThanOrEqual(
+            600.0,
+            $coastToCoastSeconds,
+            sprintf('La traversée d\'un bout à l\'autre de l\'île doit prendre >= 10 min à pied (mesuré: %.1fs).', $coastToCoastSeconds),
+        );
     }
 }

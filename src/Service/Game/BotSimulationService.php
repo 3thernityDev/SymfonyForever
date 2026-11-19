@@ -452,7 +452,7 @@ final class BotSimulationService
 
         for ($attempt = 0; $attempt < 8; ++$attempt) {
             $angle = (mt_rand(0, 359) * M_PI) / 180.0;
-            $dist = (float) mt_rand(10, 34);
+            $dist = (float) mt_rand(14, 55);
             $safe = $this->terrainService->findNearestWalkable(
                 $baseX + cos($angle) * $dist,
                 $baseZ + sin($angle) * $dist,
@@ -460,7 +460,7 @@ final class BotSimulationService
 
             $tooCloseToBoss = false;
             foreach ($worldBosses as $wb) {
-                if (hypot($safe['x'] - $wb->getPosX(), $safe['z'] - $wb->getPosZ()) < 48.0) {
+                if (hypot($safe['x'] - $wb->getPosX(), $safe['z'] - $wb->getPosZ()) < 75.0) {
                     $tooCloseToBoss = true;
                     break;
                 }
@@ -1122,7 +1122,7 @@ final class BotSimulationService
     private function pickSoloHuntTarget(Character $bot, array $zoneMonsters): ?MonsterInstance
     {
         $best = null;
-        $bestDist = 90.0;
+        $bestDist = 160.0;
 
         foreach ($zoneMonsters as $m) {
             $tpl = $m->getTemplate();
@@ -1174,7 +1174,7 @@ final class BotSimulationService
         $zones = WorldCatalog::zones();
         $zMeta = $zones[$bot->getZoneCode()] ?? $zones['lagon_ouest'];
         $angle = (mt_rand(0, 359) * M_PI) / 180.0;
-        $radius = (float) mt_rand(12, 45);
+        $radius = (float) mt_rand(18, 85);
         $cand = $this->terrainService->findNearestWalkable(
             $zMeta['respawnX'] + cos($angle) * $radius,
             $zMeta['respawnZ'] + sin($angle) * $radius,

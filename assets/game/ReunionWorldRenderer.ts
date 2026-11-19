@@ -15,6 +15,7 @@ export class ReunionWorldRenderer {
   private readonly sunLight: THREE.DirectionalLight;
   private readonly hemiLight: THREE.HemisphereLight;
   private readonly scene: THREE.Scene;
+  private readonly volcanoBaseY: number;
 
   private targetSky = new THREE.Color('#4da6e8');
   private targetFog = new THREE.Color('#a5dff9');
@@ -23,9 +24,17 @@ export class ReunionWorldRenderer {
   public constructor(scene: THREE.Scene, sampler: TerrainSampler, landmarks: LandmarkMeta[]) {
     this.scene = scene;
 
-    // Sky & atmospheric fog
+    const hubLandmark = landmarks.find((l) => l.type === 'hub');
+    const bossLandmark = landmarks.find((l) => l.type === 'boss');
+    const hubX = hubLandmark?.x ?? -2047.5;
+    const hubZ = hubLandmark?.z ?? -332.5;
+    const bossX = bossLandmark?.x ?? 1540.0;
+    const bossZ = bossLandmark?.z ?? 962.5;
+    this.volcanoBaseY = sampler.getHeight(bossX, bossZ);
+
+    // Sky & atmospheric fog tuned for the expanded 7168 x 7168 island vista
     scene.background = this.targetSky.clone();
-    scene.fog = new THREE.FogExp2(this.targetFog.getHex(), 0.0017);
+    scene.fog = new THREE.FogExp2(this.targetFog.getHex(), 0.00075);
 
     // Balanced tropical island lighting (sun + ambient + opposite sky fill so characters are never silhouette-dark)
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.72);
@@ -35,15 +44,15 @@ export class ReunionWorldRenderer {
     scene.add(this.hemiLight);
 
     this.sunLight = new THREE.DirectionalLight(0xfff5e0, 1.75);
-    this.sunLight.position.set(-340, 520, 320);
+    this.sunLight.position.set(-1200, 1400, 1100);
     scene.add(this.sunLight);
 
     const fillLight = new THREE.DirectionalLight(0xcce7ff, 0.65);
-    fillLight.position.set(360, 280, -340);
+    fillLight.position.set(1200, 900, -1100);
     scene.add(fillLight);
 
-    // 1. Displaced Terrain Geometry (256 x 256 grid over 2048 x 2048 world units)
-    const segs = 256;
+    // 1. Displaced Terrain Geometry (384 x 384 grid over 7168 x 7168 world units)
+    const segs = 384;
     const geo = new THREE.PlaneGeometry(sampler.worldSize, sampler.worldSize, segs, segs);
     geo.rotateX(-Math.PI / 2);
 
@@ -83,8 +92,8 @@ export class ReunionWorldRenderer {
       tmp.offsetHSL(0, 0, grain);
 
       // Steep remparts become dramatic dark volcanic basalt!
-      if (h > sampler.seaLevel + 2 && slope > 0.55) {
-        const cliffFactor = Math.min(0.85, (slope - 0.55) * 1.15);
+      if (h > sampler.seaLevel + 2 && slope > 0.34) {
+        const cliffFactor = Math.min(0.85, (slope - 0.34) * 1.55);
         tmp.lerp(cliffColor, cliffFactor);
       }
 
@@ -93,10 +102,10 @@ export class ReunionWorldRenderer {
         tmp.lerp(trailColor, Math.min(0.55, (trail / 255) * 0.65));
       }
 
-      // Glowing molten core in Dolomieu Crater (440, 275)
-      const dCrater = Math.hypot(wx - 440, wz - 275);
-      if (dCrater < 30) {
-        tmp.lerp(lavaColor, Math.max(0, 1 - dCrater / 30));
+      // Glowing molten core in Dolomieu Crater
+      const dCrater = Math.hypot(wx - bossX, wz - bossZ);
+      if (dCrater < 55) {
+        tmp.lerp(lavaColor, Math.max(0, 1 - dCrater / 55));
       }
 
       colors[i * 3] = tmp.r;
@@ -136,11 +145,11 @@ export class ReunionWorldRenderer {
     scene.add(this.waterMesh);
 
     // 3. Instanced vegetation, rocks & village hubs
-    this.populateVegetationAndRocks(sampler);
-    this.buildCreoleHubAndLandmarks(sampler, landmarks);
+    this.populateVegetationAndRocks(sampler, hubX, hubZ);
+    this.buildCreoleHubAndLandmarks(sampler, landmarks, hubX, hubZ);
 
-    // 4. Rising glowing embers over Piton de la Fournaise (440, 275)
-    this.volcanoParticles = this.createVolcanoEmbers(sampler);
+    // 4. Rising glowing embers over Piton de la Fournaise
+    this.volcanoParticles = this.createVolcanoEmbers(bossX, bossZ);
     scene.add(this.volcanoParticles);
   }
 
@@ -163,32 +172,34 @@ export class ReunionWorldRenderer {
 
     // Animate volcano embers
     const pAttr = this.volcanoParticles.geometry.attributes.position as THREE.BufferAttribute;
+    const minY = this.volcanoBaseY + 4;
+    const maxY = this.volcanoBaseY + 115;
     for (let i = 0; i < pAttr.count; i++) {
       let y = pAttr.getY(i) + dt * (10 + (i % 7) * 2.5);
-      if (y > 235) {
-        y = 128 + (i % 15);
+      if (y > maxY) {
+        y = minY + (i % 15);
       }
       pAttr.setY(i, y);
     }
     pAttr.needsUpdate = true;
   }
 
-  private populateVegetationAndRocks(sampler: TerrainSampler): void {
+  private populateVegetationAndRocks(sampler: TerrainSampler, hubX: number, hubZ: number): void {
     const palmMatrices: THREE.Matrix4[] = [];
     const treeMatrices: THREE.Matrix4[] = [];
     const rockMatrices: THREE.Matrix4[] = [];
     const dummy = new THREE.Object3D();
 
-    // Deterministic pseudo-random scattering across the island
+    // Deterministic pseudo-random scattering across the expanded 7168 x 7168 island
     let seed = 1337974; // 974 = La Réunion!
     const rand = () => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return seed / 4294967296;
     };
 
-    for (let i = 0; i < 4200; i++) {
-      const wx = (rand() - 0.5) * (sampler.worldSize - 120);
-      const wz = (rand() - 0.5) * (sampler.worldSize - 120);
+    for (let i = 0; i < 22000; i++) {
+      const wx = (rand() - 0.5) * (sampler.worldSize - 240);
+      const wz = (rand() - 0.5) * (sampler.worldSize - 240);
       const h = sampler.getHeight(wx, wz);
       if (h < sampler.seaLevel + 1.8) continue;
 
@@ -197,23 +208,23 @@ export class ReunionWorldRenderer {
       if (trail > 95) continue; // Keep walking trails clear!
 
       // Keep Saint-Gilles starter plaza clear
-      if (Math.hypot(wx - (-585), wz - (-95)) < 28) continue;
+      if (Math.hypot(wx - hubX, wz - hubZ) < 42) continue;
 
       const biome = sampler.getBiome(wx, wz);
       dummy.position.set(wx, h - 0.3, wz);
       dummy.rotation.set(0, rand() * Math.PI * 2, 0);
 
-      if ((biome === 1 || biome === 2) && slope < 0.55 && palmMatrices.length < 480) {
+      if ((biome === 1 || biome === 2) && slope < 0.55 && palmMatrices.length < 2400) {
         const s = 0.85 + rand() * 0.7;
         dummy.scale.set(s, s, s);
         dummy.updateMatrix();
         palmMatrices.push(dummy.matrix.clone());
-      } else if ((biome === 3 || biome === 4) && slope < 0.72 && treeMatrices.length < 1100) {
+      } else if ((biome === 3 || biome === 4) && slope < 0.72 && treeMatrices.length < 5500) {
         const s = 0.9 + rand() * 0.95;
         dummy.scale.set(s, s * (0.9 + rand() * 0.4), s);
         dummy.updateMatrix();
         treeMatrices.push(dummy.matrix.clone());
-      } else if ((biome === 5 || biome === 6 || biome === 7 || biome === 8 || slope > 0.75) && rockMatrices.length < 650) {
+      } else if ((biome === 5 || biome === 6 || biome === 7 || biome === 8 || slope > 0.45) && rockMatrices.length < 3000) {
         const s = 0.9 + rand() * 2.2;
         dummy.scale.set(s, s * (0.6 + rand() * 0.7), s);
         dummy.rotation.set(rand(), rand() * Math.PI, rand());
@@ -266,12 +277,12 @@ export class ReunionWorldRenderer {
     this.scene.add(trunkMesh, crownMesh);
   }
 
-  private buildCreoleHubAndLandmarks(sampler: TerrainSampler, landmarks: LandmarkMeta[]): void {
-    // Saint-Gilles starter village (colorful Creole huts around -585, -95)
+  private buildCreoleHubAndLandmarks(sampler: TerrainSampler, landmarks: LandmarkMeta[], hubX: number, hubZ: number): void {
+    // Saint-Gilles starter village (colorful Creole huts around the Lagoon Hub)
     const hutSpots = [
-      { x: -604, z: -110, rot: 0.5, roof: 0xdc2626, wall: 0xfef3c7 },
-      { x: -606, z: -78, rot: 1.4, roof: 0x0284c7, wall: 0xe0f2fe },
-      { x: -572, z: -116, rot: -0.3, roof: 0x16a34a, wall: 0xfef9c3 },
+      { x: hubX - 19, z: hubZ - 15, rot: 0.5, roof: 0xdc2626, wall: 0xfef3c7 },
+      { x: hubX - 21, z: hubZ + 17, rot: 1.4, roof: 0x0284c7, wall: 0xe0f2fe },
+      { x: hubX + 13, z: hubZ - 21, rot: -0.3, roof: 0x16a34a, wall: 0xfef9c3 },
     ];
 
     for (const h of hutSpots) {
@@ -329,16 +340,16 @@ export class ReunionWorldRenderer {
     }
   }
 
-  private createVolcanoEmbers(sampler: TerrainSampler): THREE.Points {
+  private createVolcanoEmbers(bossX: number, bossZ: number): THREE.Points {
     const count = 90;
     const positions = new Float32Array(count * 3);
-    const baseY = sampler.getHeight(440, 275);
+    const baseY = this.volcanoBaseY;
     for (let i = 0; i < count; i++) {
       const a = (i / count) * Math.PI * 2 * 5;
-      const r = (i % 19) * 1.4;
-      positions[i * 3] = 440 + Math.cos(a) * r;
+      const r = (i % 19) * 2.2;
+      positions[i * 3] = bossX + Math.cos(a) * r;
       positions[i * 3 + 1] = baseY + 5 + (i % 35) * 3;
-      positions[i * 3 + 2] = 275 + Math.sin(a) * r;
+      positions[i * 3 + 2] = bossZ + Math.sin(a) * r;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));

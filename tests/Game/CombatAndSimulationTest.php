@@ -11,6 +11,7 @@ use App\Entity\Party;
 use App\Entity\User;
 use App\Entity\Zone;
 use App\Game\CharacterClass;
+use App\Game\WorldCatalog;
 use App\Repository\MonsterTemplateRepository;
 use App\Service\Game\CombatService;
 use App\Service\Game\StatCalculator;
@@ -56,12 +57,16 @@ final class CombatAndSimulationTest extends KernelTestCase
         $party = (new Party())->setName('Escouade 974');
         $this->em->persist($party);
 
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $hub['respawnX'];
+        $hz = $hub['respawnZ'];
+
         $tank = (new Character($user, 'Tank974', CharacterClass::TANK))
-            ->setLevel(4)->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now)->setParty($party);
+            ->setLevel(4)->setPosX($hx)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now)->setParty($party);
         $dps = (new Character($user, 'Dps974', CharacterClass::DPS))
-            ->setLevel(4)->setPosX(-583.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now)->setParty($party);
+            ->setLevel(4)->setPosX($hx + 2.0)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now)->setParty($party);
         $heal = (new Character($user, 'Heal974', CharacterClass::HEAL))
-            ->setLevel(4)->setPosX(-588.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now)->setParty($party);
+            ->setLevel(4)->setPosX($hx - 3.0)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now)->setParty($party);
 
         foreach ([$tank, $dps, $heal] as $ch) {
             $s = $this->stats->compute($ch);
@@ -73,7 +78,7 @@ final class CombatAndSimulationTest extends KernelTestCase
             ->setLevel(3)->setMaxHp(500)->setAttack(20)->setDefense(5)->setXpReward(160);
         $this->em->persist($tpl);
 
-        $monster = new MonsterInstance($tpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $monster = new MonsterInstance($tpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
         $this->em->persist($monster);
         $this->em->flush();
 
@@ -132,13 +137,17 @@ final class CombatAndSimulationTest extends KernelTestCase
         $user = (new User())->setUsername('balancer')->setEmail('bal@reunion.re')->setPassword('hash');
         $this->em->persist($user);
 
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $hub['respawnX'];
+        $hz = $hub['respawnZ'];
+
         // 1. Verify class resource pools & insufficient-resource rejection
         $tank = (new Character($user, 'RageTank', CharacterClass::TANK))
-            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now);
+            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now);
         $dps = (new Character($user, 'EnergyDps', CharacterClass::DPS))
-            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now);
+            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now);
         $heal = (new Character($user, 'ManaHeal', CharacterClass::HEAL))
-            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now);
+            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now);
 
         self::assertSame(100, $this->stats->compute($tank)['maxMp']);
         self::assertSame(100, $this->stats->compute($dps)['maxMp']);
@@ -150,7 +159,7 @@ final class CombatAndSimulationTest extends KernelTestCase
             $this->em->persist($c);
         }
 
-        $dummy = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $dummy = new MonsterInstance($crabTpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
         $this->em->persist($dummy);
         $this->em->flush();
 
@@ -167,7 +176,7 @@ final class CombatAndSimulationTest extends KernelTestCase
         self::assertSame('Mana insuffisant.', $noMana['error']);
 
         // 2. Auto-Attack costs 0 resource, generates Rage/Énergie/Mana, and takes ~30s (~20-34 hits) on a same-level mob
-        $aaMob = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $aaMob = new MonsterInstance($crabTpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
         $this->em->persist($aaMob);
         $this->em->flush();
 
@@ -193,7 +202,7 @@ final class CombatAndSimulationTest extends KernelTestCase
         self::assertLessThanOrEqual(34, $swings, 'Tuer un monstre de même niveau à l\'auto-attaque doit prendre ~30s.');
 
         // Also check Tank (+15 Rage/hit) & Heal (+10 Mana/hit) generation
-        $aaTankMob = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $aaTankMob = new MonsterInstance($crabTpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
         $this->em->persist($aaTankMob);
         $this->em->flush();
         $aaTank = $this->combat->performAutoAttack($tank, 'MONSTER', $aaTankMob->getId(), $t + 5.0);
@@ -208,7 +217,7 @@ final class CombatAndSimulationTest extends KernelTestCase
         ] as [$hero, $skillCode, $label]) {
             $s = $this->stats->compute($hero);
             $hero->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
-            $skillMob = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+            $skillMob = new MonsterInstance($crabTpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
             $this->em->persist($skillMob);
             $this->em->flush();
 
@@ -235,12 +244,16 @@ final class CombatAndSimulationTest extends KernelTestCase
         $user = (new User())->setUsername('scaler')->setEmail('sc@reunion.re')->setPassword('hash');
         $this->em->persist($user);
 
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $hub['respawnX'];
+        $hz = $hub['respawnZ'];
+
         $dps = (new Character($user, 'RankDps', CharacterClass::DPS))
-            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0);
+            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz);
         $heal = (new Character($user, 'RankHeal', CharacterClass::HEAL))
-            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0);
+            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz);
         $tank = (new Character($user, 'RankTank', CharacterClass::TANK))
-            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0);
+            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz);
 
         foreach ([$dps, $heal, $tank] as $c) {
             $s = $this->stats->compute($c);
@@ -251,7 +264,7 @@ final class CombatAndSimulationTest extends KernelTestCase
         $tpl = (new MonsterTemplate('dummy_scale', 'Mannequin Basalte'))
             ->setLevel(6)->setMaxHp(5000)->setDefense(20)->setXpReward(10);
         $this->em->persist($tpl);
-        $dummy = new MonsterInstance($tpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $dummy = new MonsterInstance($tpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
         $this->em->persist($dummy);
         $this->em->flush();
 

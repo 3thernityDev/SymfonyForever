@@ -107,7 +107,7 @@ export class TerrainSampler {
   }
 
   public getSlope(wx: number, wz: number): number {
-    const eps = 4.0;
+    const eps = 6.0;
     const hL = this.getHeight(wx - eps, wz);
     const hR = this.getHeight(wx + eps, wz);
     const hD = this.getHeight(wx, wz - eps);
@@ -134,7 +134,7 @@ export class TerrainSampler {
   }
 
   public isWalkable(wx: number, wz: number): boolean {
-    if (Math.abs(wx) > this.halfWorld - 20 || Math.abs(wz) > this.halfWorld - 20) return false;
+    if (Math.abs(wx) > this.halfWorld - 40 || Math.abs(wz) > this.halfWorld - 40) return false;
     const h = this.getHeight(wx, wz);
     if (h < this.walkableMinY) return false;
     return this.getSlope(wx, wz) <= this.maxWalkableSlope;

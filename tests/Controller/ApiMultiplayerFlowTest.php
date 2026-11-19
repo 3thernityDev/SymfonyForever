@@ -7,6 +7,7 @@ namespace App\Tests\Controller;
 use App\Entity\Character;
 use App\Entity\User;
 use App\Game\CharacterClass;
+use App\Game\WorldCatalog;
 use App\Service\Game\StatCalculator;
 use App\Service\Game\WorldSeederService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -45,11 +46,12 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertCount(12, $manifest['skills']);
 
         // 2. Authenticate a user with a Tank character at Saint-Gilles
+        $hub = WorldCatalog::zones()['lagon_ouest'];
         $user = (new User())->setUsername('reunion_player')->setEmail('p@reunion.re')->setPassword('unused');
         $this->em->persist($user);
 
         $char = (new Character($user, 'PitonGuard', CharacterClass::TANK))
-            ->setPosX(-550.0)->setPosY(12.0)->setPosZ(-70.0)->setZoneCode('lagon_ouest');
+            ->setPosX($hub['respawnX'])->setPosY(12.0)->setPosZ($hub['respawnZ'])->setZoneCode('lagon_ouest');
         $stats = self::getContainer()->get(StatCalculator::class)->compute($char);
         $char->setCurrentHp($stats['maxHp'])->setCurrentMp($stats['maxMp']);
         $this->em->persist($char);
@@ -64,8 +66,8 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         // 4. HTTP World Sync returns self, zone & nearby monsters
         $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
             'characterId' => $char->getId(),
-            'x' => -550.0,
-            'z' => -70.0,
+            'x' => $hub['respawnX'],
+            'z' => $hub['respawnZ'],
             'rotY' => 0.5,
             'isMoving' => true,
             'lastEventId' => 0,

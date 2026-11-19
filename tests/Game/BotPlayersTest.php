@@ -11,6 +11,7 @@ use App\Entity\Party;
 use App\Entity\User;
 use App\Game\BotProfileCatalog;
 use App\Game\CharacterClass;
+use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
 use App\Repository\MonsterTemplateRepository;
@@ -59,7 +60,8 @@ final class BotPlayersTest extends KernelTestCase
     public function testMaintainsTenOnlinePlayersWithReunionPseudonymsAndZoneDistribution(): void
     {
         $now = 1000.0;
-        $human = $this->createHuman('Hero974', CharacterClass::DPS, 'lagon_ouest', -585.0, -95.0, $now);
+        $lagon = WorldCatalog::zones()['lagon_ouest'];
+        $human = $this->createHuman('Hero974', CharacterClass::DPS, 'lagon_ouest', $lagon['respawnX'], $lagon['respawnZ'], $now);
         $this->em->flush();
 
         $ran = $this->botSim->tick('lagon_ouest', $now, false);
@@ -100,7 +102,8 @@ final class BotPlayersTest extends KernelTestCase
     public function testBotAcceptsPartyInviteGreetsInFrenchAndJoinsLeaderZone(): void
     {
         $now = 2000.0;
-        $leader = $this->createHuman('CapitaineSalazie', CharacterClass::TANK, 'salazie', 95.0, -290.0, $now);
+        $salazie = WorldCatalog::zones()['salazie'];
+        $leader = $this->createHuman('CapitaineSalazie', CharacterClass::TANK, 'salazie', $salazie['respawnX'], $salazie['respawnZ'], $now);
         $this->em->flush();
 
         $this->botSim->tick('salazie', $now, false);
@@ -150,7 +153,8 @@ final class BotPlayersTest extends KernelTestCase
     public function testBotRepliesInFrenchToPlayerChatWithoutBotLoops(): void
     {
         $now = 3000.0;
-        $human = $this->createHuman('Bavard974', CharacterClass::HEAL, 'lagon_ouest', -585.0, -95.0, $now);
+        $lagon = WorldCatalog::zones()['lagon_ouest'];
+        $human = $this->createHuman('Bavard974', CharacterClass::HEAL, 'lagon_ouest', $lagon['respawnX'], $lagon['respawnZ'], $now);
         $this->em->flush();
 
         $this->botSim->tick('lagon_ouest', $now, false);
@@ -182,7 +186,10 @@ final class BotPlayersTest extends KernelTestCase
     public function testBotFightsKillsMonsterAndLevelsUpAutomatically(): void
     {
         $now = 4000.0;
-        $human = $this->createHuman('TemoinCombat', CharacterClass::TANK, 'lagon_ouest', -585.0, -95.0, $now);
+        $lagon = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $lagon['respawnX'];
+        $hz = $lagon['respawnZ'];
+        $human = $this->createHuman('TemoinCombat', CharacterClass::TANK, 'lagon_ouest', $hx, $hz, $now);
         $botOwner = (new User())->setUsername('bot_combat_test')->setEmail('bc@reunion.re')->setPassword('unused');
         $this->em->persist($botOwner);
 
@@ -193,9 +200,9 @@ final class BotPlayersTest extends KernelTestCase
             ->setLevel(1)
             ->setXp(max(0, $needed - 10))
             ->setZoneCode('lagon_ouest')
-            ->setPosX(-551.0)
+            ->setPosX($hx + 2.0)
             ->setPosY(12.0)
-            ->setPosZ(-70.0)
+            ->setPosZ($hz)
             ->setLastSeenAt($now - 1.5)
             ->setBotState(['homeZone' => 'lagon_ouest', 'pauseUntil' => 0.0, 'nextChatAt' => $now + 999.0]);
 
@@ -203,15 +210,14 @@ final class BotPlayersTest extends KernelTestCase
         $bot->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
         $this->em->persist($bot);
 
-        // Weakened Crabe right next to the bot (0.2m away -> strictly closest monster in lagon_ouest)
+        // Weakened Crabe right next to the bot (1m away -> strictly closest monster in lagon_ouest)
         $crabTpl = $this->tplRepo->findOneByCode('crabe_recif');
         self::assertNotNull($crabTpl);
-        $weakCrab = (new MonsterInstance($crabTpl, 'lagon_ouest', -551.2, 12.0, -70.0))
+        $weakCrab = (new MonsterInstance($crabTpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz))
             ->setCurrentHp(5);
         $this->em->persist($weakCrab);
         $this->em->flush();
 
-        // Keep total bots below target? Ensure human + existing bots don't distract: tick once -> bot engages and finishes mob
         $this->botSim->tick('lagon_ouest', $now, false);
 
         self::assertSame(MonsterInstance::STATE_DEAD, $weakCrab->getState(), 'Le bot doit attaquer et achever le monstre proche.');
@@ -222,7 +228,10 @@ final class BotPlayersTest extends KernelTestCase
     public function testBotPermadeathUngroupsDeletesPermanentlyAndSpawnsFreshReplacement(): void
     {
         $now = 5000.0;
-        $human = $this->createHuman('Survivant974', CharacterClass::TANK, 'lagon_ouest', -585.0, -95.0, $now);
+        $lagon = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $lagon['respawnX'];
+        $hz = $lagon['respawnZ'];
+        $human = $this->createHuman('Survivant974', CharacterClass::TANK, 'lagon_ouest', $hx, $hz, $now);
         $this->em->flush();
 
         // Spawn full 9 bots (total 10 online)
@@ -241,14 +250,14 @@ final class BotPlayersTest extends KernelTestCase
         $human->setParty($party);
         $doomedBot->setParty($party)
             ->setZoneCode('lagon_ouest')
-            ->setPosX(-495.0)
+            ->setPosX($hx + 30.0)
             ->setPosY(12.0)
-            ->setPosZ(-60.0)
+            ->setPosZ($hz)
             ->setCurrentHp(1);
 
         $killerTpl = $this->tplRepo->findOneByCode('molosse_magma');
         self::assertNotNull($killerTpl);
-        $killerMob = (new MonsterInstance($killerTpl, 'lagon_ouest', -494.0, 12.0, -60.0))
+        $killerMob = (new MonsterInstance($killerTpl, 'lagon_ouest', $hx + 31.0, 12.0, $hz))
             ->setState(MonsterInstance::STATE_COMBAT)
             ->setThreatTable([(string) $oldBotId => 500.0])
             ->setLastAttackAt($now - 10.0);

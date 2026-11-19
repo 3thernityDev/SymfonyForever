@@ -179,6 +179,8 @@ export interface ManifestResponse {
     seaLevel: number;
     walkableMinY: number;
     maxWalkableSlope: number;
+    walkSpeed?: number;
+    sprintSpeed?: number;
     heightmapUrl: string;
     biomesUrl: string;
     minimapUrl: string;

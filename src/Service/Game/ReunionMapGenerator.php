@@ -58,7 +58,7 @@ final class ReunionMapGenerator
         }
 
         // Pass 2: Carve natural winding walkable trail corridors connecting all 7 zones across the island
-        $trailSegments = [
+        $baseTrails = [
             // Saint-Gilles Hub -> Col des Boeufs -> Cirque de Mafate
             [[-585.0, -95.0], [-490.0, -145.0], [-405.0, -210.0], [-320.0, -230.0], [-250.0, -240.0]],
             // Mafate -> Col de Fourche -> Cirque de Salazie
@@ -74,6 +74,14 @@ final class ReunionMapGenerator
             // Cilaos -> Sud Sauvage -> Fournaise flank
             [[-130.0, 145.0], [-70.0, 310.0], [40.0, 445.0], [175.0, 505.0], [285.0, 440.0], [340.0, 315.0]],
         ];
+
+        $trailSegments = array_map(
+            static fn (array $line): array => array_map(
+                static fn (array $pt): array => [$pt[0] * WorldCatalog::WORLD_SCALE, $pt[1] * WorldCatalog::WORLD_SCALE],
+                $line,
+            ),
+            $baseTrails,
+        );
 
         $this->applyTrails($heights, $trails, $res, $trailSegments);
 
@@ -91,12 +99,17 @@ final class ReunionMapGenerator
                 $idx = $gz * $res + $gx;
                 $h = (float) $heights[$idx];
 
-                $warpX = $wx + $this->fbm($u * 9.0 + 3.1, $v * 9.0 + 1.7, 3) * 110.0;
-                $warpZ = $wz + $this->fbm($u * 9.0 + 8.4, $v * 9.0 + 5.2, 3) * 110.0;
+                $bx = $wx / WorldCatalog::WORLD_SCALE;
+                $bz = $wz / WorldCatalog::WORLD_SCALE;
+                $warpBx = $bx + $this->fbm($u * 9.0 + 3.1, $v * 9.0 + 1.7, 3) * 110.0;
+                $warpBz = $bz + $this->fbm($u * 9.0 + 8.4, $v * 9.0 + 5.2, 3) * 110.0;
+                $bh = $h <= WorldCatalog::SEA_LEVEL
+                    ? $h
+                    : WorldCatalog::SEA_LEVEL + ($h - WorldCatalog::SEA_LEVEL) / WorldCatalog::RELIEF_SCALE;
 
-                $zoneIdx = $this->computeZoneIndex($warpX, $warpZ, $h);
+                $zoneIdx = $this->computeZoneIndex($warpBx, $warpBz, $bh);
                 $zones[$idx] = $zoneIdx;
-                $biomes[$idx] = $this->computeBiome($wx, $wz, $warpX, $warpZ, $h, $zoneIdx);
+                $biomes[$idx] = $this->computeBiome($warpBx, $warpBz, $bh, $zoneIdx);
             }
         }
 
@@ -157,51 +170,55 @@ final class ReunionMapGenerator
         $coastFactor = $this->smoothstep(1.04, 0.86, $ovalDist);
         $baseHeight = 2.0 + $coastFactor * (11.5 - 3.5 * $isWestLagoon);
 
+        // Work in normalized base-island coordinates (-1024..+1024) so geography preserves 1:1 proportions
+        $bx = $wx / WorldCatalog::WORLD_SCALE;
+        $bz = $wz / WorldCatalog::WORLD_SCALE;
+
         // Flatten a comfortable coastal plain & Saint-Gilles hub shelf
-        $hubShelf = $this->gauss($wx, $wz, -585.0, -95.0, 120.0);
+        $hubShelf = $this->gauss($bx, $bz, -585.0, -95.0, 120.0);
 
         // Broad island dome rising inland
         $inland = $this->smoothstep(0.92, 0.18, $ovalDist);
         $baseHeight += $inland * 52.0 * (1.0 - 0.55 * $hubShelf);
 
-        // === 1. Massif du Piton des Neiges (3070m -> ~175 world units) ===
-        $pitonMain = 122.0 * $this->gauss($wx, $wz, -75.0, -65.0, 210.0);
-        $pitonPeak = 44.0 * $this->gauss($wx, $wz, -75.0, -65.0, 75.0);
+        // === 1. Massif du Piton des Neiges (3070m) ===
+        $pitonMain = 122.0 * $this->gauss($bx, $bz, -75.0, -65.0, 210.0);
+        $pitonPeak = 44.0 * $this->gauss($bx, $bz, -75.0, -65.0, 75.0);
         // Radiating ridges (Grand Bénare W, Roche Écrite N, Bélouve E)
-        $ridgeWest = 34.0 * $this->gauss($wx, $wz, -230.0, -70.0, 115.0);
-        $ridgeNorth = 30.0 * $this->gauss($wx, $wz, -55.0, -290.0, 110.0);
-        $ridgeBelouve = 28.0 * $this->gauss($wx, $wz, 90.0, -95.0, 125.0);
+        $ridgeWest = 34.0 * $this->gauss($bx, $bz, -230.0, -70.0, 115.0);
+        $ridgeNorth = 30.0 * $this->gauss($bx, $bz, -55.0, -290.0, 110.0);
+        $ridgeBelouve = 28.0 * $this->gauss($bx, $bz, 90.0, -95.0, 125.0);
 
         $elevation = $baseHeight + $pitonMain + $pitonPeak + $ridgeWest + $ridgeNorth + $ridgeBelouve;
 
         // === 2. Les 3 Cirques (deeply carved amphitheaters around Piton des Neiges) ===
         // Cirque de Mafate (NW)
-        $mafateCarve = 64.0 * $this->gauss($wx, $wz, -250.0, -240.0, 112.0);
-        $mafateFloor = 12.0 * $this->fbm($u * 22.0, $v * 22.0, 3) * $this->gauss($wx, $wz, -250.0, -240.0, 100.0);
+        $mafateCarve = 64.0 * $this->gauss($bx, $bz, -250.0, -240.0, 112.0);
+        $mafateFloor = 12.0 * $this->fbm($u * 22.0, $v * 22.0, 3) * $this->gauss($bx, $bz, -250.0, -240.0, 100.0);
         // Cirque de Salazie (NE)
-        $salazieCarve = 68.0 * $this->gauss($wx, $wz, 95.0, -290.0, 125.0);
+        $salazieCarve = 68.0 * $this->gauss($bx, $bz, 95.0, -290.0, 125.0);
         // Cirque de Cilaos (South)
-        $cilaosCarve = 66.0 * $this->gauss($wx, $wz, -130.0, 145.0, 120.0);
+        $cilaosCarve = 66.0 * $this->gauss($bx, $bz, -130.0, 145.0, 120.0);
 
         $elevation -= ($mafateCarve + $salazieCarve + $cilaosCarve);
         $elevation += $mafateFloor;
 
         // === 3. Plaine des Cafres & Plaine des Sables (high volcanic saddle) ===
-        $plaineSaddle = 42.0 * $this->gauss($wx, $wz, 215.0, 190.0, 165.0);
+        $plaineSaddle = 42.0 * $this->gauss($bx, $bz, 215.0, 190.0, 165.0);
         $elevation += $plaineSaddle;
 
-        // === 4. Piton de la Fournaise (2632m -> ~148 world units) & Dolomieu Crater ===
-        $fournaiseMassif = 102.0 * $this->gauss($wx, $wz, 435.0, 275.0, 185.0);
-        $fournaiseCone = 40.0 * $this->gauss($wx, $wz, 440.0, 275.0, 65.0);
+        // === 4. Piton de la Fournaise (2632m) & Dolomieu Crater ===
+        $fournaiseMassif = 102.0 * $this->gauss($bx, $bz, 435.0, 275.0, 185.0);
+        $fournaiseCone = 40.0 * $this->gauss($bx, $bz, 440.0, 275.0, 65.0);
         // Sunken Dolomieu crater arena at summit
-        $dolomieuCrater = 26.0 * $this->gauss($wx, $wz, 440.0, 275.0, 28.0);
+        $dolomieuCrater = 26.0 * $this->gauss($bx, $bz, 440.0, 275.0, 28.0);
         // Enclos Fouqué slope descending East to Grand Brûlé
-        $enclosCarve = 18.0 * $this->gauss($wx, $wz, 560.0, 315.0, 95.0);
+        $enclosCarve = 18.0 * $this->gauss($bx, $bz, 560.0, 315.0, 95.0);
 
         $elevation += $fournaiseMassif + $fournaiseCone - $dolomieuCrater - $enclosCarve;
 
         // === 5. Sud Sauvage basalt terrace ===
-        $sudShelf = 14.0 * $this->gauss($wx, $wz, 190.0, 520.0, 155.0);
+        $sudShelf = 14.0 * $this->gauss($bx, $bz, 190.0, 520.0, 155.0);
         $elevation += $sudShelf;
 
         // === 6. Fine geological detail noise (scaled by inland height so beaches stay smooth) ===
@@ -217,10 +234,17 @@ final class ReunionMapGenerator
             $elevation = $elevation * (1.0 - $t) + 2.0 * $t;
         }
 
-        // Keep Saint-Gilles starter hub nicely flat and scenic (~11m above sea)
+        // Scale vertical relief proportionally to the enlarged 3.5x island while keeping sea level & beaches grounded
+        $elevation = max(0.0, min(185.0, $elevation));
+        if ($elevation > WorldCatalog::SEA_LEVEL) {
+            $excess = $elevation - WorldCatalog::SEA_LEVEL;
+            $elevation = WorldCatalog::SEA_LEVEL + $excess * WorldCatalog::RELIEF_SCALE;
+        }
+
+        // Keep Saint-Gilles starter hub nicely flat and scenic (~12m above sea)
         if ($hubShelf > 0.2) {
             $blend = $this->smoothstep(0.2, 0.85, $hubShelf);
-            $elevation = $elevation * (1.0 - $blend * 0.75) + 12.0 * ($blend * 0.75);
+            $elevation = $elevation * (1.0 - $blend * 0.78) + 12.0 * ($blend * 0.78);
         }
 
         return max(0.0, min(WorldCatalog::MAX_ELEVATION, $elevation));
@@ -233,7 +257,7 @@ final class ReunionMapGenerator
      */
     private function applyTrails(\SplFixedArray $heights, \SplFixedArray $trails, int $res, array $polylines): void
     {
-        $halfWidth = 34.0;
+        $halfWidth = 42.0;
         $samplePoints = [];
 
         // Sample polylines densely and record target smoothed heights along each trail
@@ -243,7 +267,7 @@ final class ReunionMapGenerator
                 [$x0, $z0] = $line[$i];
                 [$x1, $z1] = $line[$i + 1];
                 $dist = hypot($x1 - $x0, $z1 - $z0);
-                $steps = max(4, (int) ceil($dist / 14.0));
+                $steps = max(4, (int) ceil($dist / 20.0));
                 for ($s = 0; $s <= $steps; ++$s) {
                     $t = $s / $steps;
                     $wx = $x0 + ($x1 - $x0) * $t;
@@ -293,7 +317,7 @@ final class ReunionMapGenerator
                     $idx = $gz * $res + $gx;
                     $cur = (float) $heights[$idx];
                     $heights[$idx] = $cur * (1.0 - $blend * 0.65) + $pt['h'] * ($blend * 0.65);
-                    if ($d < 14.0) {
+                    if ($d < 18.0) {
                         $trails[$idx] = max((int) $trails[$idx], (int) round($blend * 255));
                     }
                 }
@@ -361,41 +385,41 @@ final class ReunionMapGenerator
         return $best;
     }
 
-    private function computeBiome(float $wx, float $wz, float $warpX, float $warpZ, float $h, int $zoneIdx): int
+    private function computeBiome(float $warpBx, float $warpBz, float $bh, int $zoneIdx): int
     {
-        if ($h < WorldCatalog::SEA_LEVEL - 0.8) {
+        if ($bh < WorldCatalog::SEA_LEVEL - 0.8) {
             return WorldCatalog::BIOME_OCEAN;
         }
 
-        // Fournaise volcano slopes & crater (organic radial distance)
-        $distCrater = hypot($warpX - 440.0, $warpZ - 275.0);
+        // Fournaise volcano slopes & crater (organic radial distance in base coordinates)
+        $distCrater = hypot($warpBx - 440.0, $warpBz - 275.0);
         if ($distCrater < 135.0) {
             return WorldCatalog::BIOME_VOLCANO_LAVA;
         }
         // Plaine des Sables ochre lunar plateau
-        if (hypot($warpX - 275.0, $warpZ - 220.0) < 125.0 && $h > 48.0) {
+        if (hypot($warpBx - 275.0, $warpBz - 220.0) < 125.0 && $bh > 48.0) {
             return WorldCatalog::BIOME_PLAINE_SABLES;
         }
-        if ($zoneIdx === 6 && $h > 65.0) {
+        if ($zoneIdx === 6 && $bh > 65.0) {
             return WorldCatalog::BIOME_VOLCANO_LAVA;
         }
-        if ($zoneIdx === 6 && $h > 35.0) {
+        if ($zoneIdx === 6 && $bh > 35.0) {
             return WorldCatalog::BIOME_PLAINE_SABLES;
         }
 
         // Sud Sauvage dark basalt flows & rocky coastline
-        if ($zoneIdx === 4 && $h < 76.0) {
+        if ($zoneIdx === 4 && $bh < 76.0) {
             return WorldCatalog::BIOME_SUD_SAUVAGE;
         }
 
         // High altitude Piton des Neiges alpine rock
-        if ($h > 116.0) {
+        if ($bh > 116.0) {
             return WorldCatalog::BIOME_HIGHLANDS;
         }
 
         // Western Lagoon golden beaches (smooth organic transition along West coast)
-        $westShoreWeight = $this->gauss($warpX, $warpZ, -600.0, -20.0, 320.0);
-        if ($h < (8.5 + 5.5 * $westShoreWeight) && $warpX < -180.0) {
+        $westShoreWeight = $this->gauss($warpBx, $warpBz, -600.0, -20.0, 320.0);
+        if ($bh < (8.5 + 5.5 * $westShoreWeight) && $warpBx < -180.0) {
             return WorldCatalog::BIOME_LAGOON_BEACH;
         }
 
@@ -473,12 +497,12 @@ final class ReunionMapGenerator
                     $hR = $x < $res - 1 ? (float) $heights[$idx + 1] : $h;
                     $hU = $z > 0 ? (float) $heights[$idx - $res] : $h;
                     $hD = $z < $res - 1 ? (float) $heights[$idx + $res] : $h;
-                    $shade = 1.0 + max(-0.45, min(0.45, (($hL - $hR) + ($hU - $hD)) * 0.08));
+                    $shade = 1.0 + max(-0.45, min(0.45, (($hL - $hR) + ($hU - $hD)) * 0.07));
 
-                    // Crater glow accent
-                    $wx = ($x / ($res - 1) - 0.5) * WorldCatalog::WORLD_SIZE;
-                    $wz = ($z / ($res - 1) - 0.5) * WorldCatalog::WORLD_SIZE;
-                    if (hypot($wx - 440.0, $wz - 275.0) < 26.0) {
+                    // Crater glow accent (in base island coordinates)
+                    $bx = (($x / ($res - 1) - 0.5) * WorldCatalog::WORLD_SIZE) / WorldCatalog::WORLD_SCALE;
+                    $bz = (($z / ($res - 1) - 0.5) * WorldCatalog::WORLD_SIZE) / WorldCatalog::WORLD_SCALE;
+                    if (hypot($bx - 440.0, $bz - 275.0) < 26.0) {
                         $r = 255;
                         $g = 96;
                         $bl = 28;

@@ -58,7 +58,7 @@ final class ReunionTerrainService
 
     public function getSlope(float $wx, float $wz): float
     {
-        $eps = 4.0;
+        $eps = 6.0;
         $hL = $this->getHeight($wx - $eps, $wz);
         $hR = $this->getHeight($wx + $eps, $wz);
         $hD = $this->getHeight($wx, $wz - $eps);
@@ -89,7 +89,7 @@ final class ReunionTerrainService
 
     public function isWalkable(float $wx, float $wz): bool
     {
-        if (abs($wx) > WorldCatalog::HALF_WORLD - 20.0 || abs($wz) > WorldCatalog::HALF_WORLD - 20.0) {
+        if (abs($wx) > WorldCatalog::HALF_WORLD - 40.0 || abs($wz) > WorldCatalog::HALF_WORLD - 40.0) {
             return false;
         }
 
@@ -106,13 +106,13 @@ final class ReunionTerrainService
      *
      * @return array{x: float, y: float, z: float}
      */
-    public function findNearestWalkable(float $wx, float $wz, float $maxRadius = 90.0): array
+    public function findNearestWalkable(float $wx, float $wz, float $maxRadius = 180.0): array
     {
         if ($this->isWalkable($wx, $wz)) {
             return ['x' => $wx, 'y' => $this->getHeight($wx, $wz), 'z' => $wz];
         }
 
-        for ($r = 8.0; $r <= $maxRadius; $r += 8.0) {
+        for ($r = 10.0; $r <= $maxRadius; $r += 10.0) {
             for ($a = 0; $a < 16; ++$a) {
                 $rad = ($a / 16.0) * M_PI * 2.0;
                 $cx = $wx + cos($rad) * $r;
@@ -146,11 +146,23 @@ final class ReunionTerrainService
 
         $raw = file_get_contents($binaryPath);
         if ($raw === false || strlen($raw) < 4) {
-            throw new \RuntimeException('Impossible de lire le cache terrain binaire.');
+            $this->generator->generate();
+            $raw = file_get_contents($binaryPath);
         }
 
-        $header = unpack('Vres', substr($raw, 0, 4));
-        $this->res = (int) ($header['res'] ?? WorldCatalog::MAP_RESOLUTION);
+        $header = is_string($raw) && strlen($raw) >= 4 ? unpack('Vres', substr($raw, 0, 4)) : false;
+        $res = (int) ($header['res'] ?? 0);
+        $expectedLen = 4 + $res * $res * 6;
+        if ($res !== WorldCatalog::MAP_RESOLUTION || !is_string($raw) || strlen($raw) !== $expectedLen) {
+            $this->generator->generate();
+            $raw = file_get_contents($binaryPath);
+            if ($raw === false || strlen($raw) < 4) {
+                throw new \RuntimeException('Impossible de lire le cache terrain binaire.');
+            }
+            $res = WorldCatalog::MAP_RESOLUTION;
+        }
+
+        $this->res = $res;
         $count = $this->res * $this->res;
         $heightLen = $count * 4;
 
