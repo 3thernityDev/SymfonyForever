@@ -1,0 +1,12 @@
+.git
+.gitignore
+.phpunit.cache
+node_modules
+vendor
+var
+public/build
+tests
+.env.local
+.env.*.local
+phpunit.xml
+compose*.yaml

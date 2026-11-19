@@ -2,11 +2,14 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
-    # Note that the session will be started ONLY if you read or write from it.
-    session: true
+    # Trust reverse proxies (Fly.io TLS termination -> HTTP :8080)
+    trusted_proxies: '127.0.0.1,REMOTE_ADDR'
+    trusted_headers: ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-host']
 
-    #esi: true
-    #fragments: true
+    # Note that the session will be started ONLY if you read or write from it.
+    session:
+        cookie_secure: auto
+        cookie_samesite: lax
 
 when@test:
     framework:
