@@ -381,6 +381,7 @@ export interface PartyState {
 export interface SyncResponse {
   serverTime: number;
   correctedPosition: boolean;
+  onlineCount?: number;
   self: SelfState;
   zone: ZoneMeta;
   players: PublicPlayer[];

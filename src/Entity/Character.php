@@ -135,6 +135,13 @@ class Character
     #[ORM\Column]
     private float $lastSeenAt = 0.0;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $isBot = false;
+
+    /** @var array<string, mixed> */
+    #[ORM\Column(type: 'json', options: ['default' => '{}'])]
+    private array $botState = [];
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -612,6 +619,36 @@ class Character
     public function setLastSeenAt(float $lastSeenAt): self
     {
         $this->lastSeenAt = $lastSeenAt;
+
+        return $this;
+    }
+
+    public function isBot(): bool
+    {
+        return $this->isBot;
+    }
+
+    public function setIsBot(bool $isBot): self
+    {
+        $this->isBot = $isBot;
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getBotState(): array
+    {
+        return $this->botState;
+    }
+
+    /**
+     * @param array<string, mixed> $botState
+     */
+    public function setBotState(array $botState): self
+    {
+        $this->botState = $botState;
 
         return $this;
     }

@@ -438,8 +438,10 @@ final class CombatService
             return [$killerXp, $killerLeveledUp];
         }
 
-        // Standard monster / elite: spawn shared ground loot chest for the killer / party
-        $this->inventoryService->spawnLootForMonster($monster, $killer, $now);
+        // Standard monster / elite: spawn shared ground loot chest for players (or grouped bots)
+        if ($killer === null || !$killer->isBot() || $killer->getParty() !== null) {
+            $this->inventoryService->spawnLootForMonster($monster, $killer, $now);
+        }
 
         if ($killer === null) {
             return [0, false];

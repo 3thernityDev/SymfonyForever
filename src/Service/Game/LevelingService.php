@@ -37,7 +37,7 @@ final class LevelingService
      */
     public function grantXp(Character $character, int $amount): array
     {
-        if ($amount <= 0 || $character->getLevel() >= self::MAX_LEVEL) {
+        if ($amount <= 0 || $character->getLevel() >= self::MAX_LEVEL || ($character->isBot() && $character->isDead())) {
             return ['leveledUp' => false, 'newLevel' => $character->getLevel(), 'levelsGained' => 0, 'skillPointsGained' => 0];
         }
 

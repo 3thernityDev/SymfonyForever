@@ -9,6 +9,7 @@ use App\Entity\Party;
 use App\Entity\User;
 use App\Repository\CharacterRepository;
 use App\Repository\PartyRepository;
+use App\Service\Game\BotSimulationService;
 use App\Service\Game\StatePayloadBuilder;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -23,6 +24,7 @@ final class PartyController extends AbstractController
         Request $request,
         CharacterRepository $characterRepository,
         StatePayloadBuilder $payloadBuilder,
+        BotSimulationService $botSimulationService,
         EntityManagerInterface $em,
     ): JsonResponse {
         /** @var User $user */
@@ -40,6 +42,10 @@ final class PartyController extends AbstractController
 
         if (!$target instanceof Character || $target->getId() === $caster->getId()) {
             return $this->json(['ok' => false, 'error' => 'Joueur introuvable.'], 404);
+        }
+
+        if ($target->isDead()) {
+            return $this->json(['ok' => false, 'error' => 'Ce joueur est vaincu.'], 422);
         }
 
         if ($target->getParty() !== null) {
@@ -61,6 +67,7 @@ final class PartyController extends AbstractController
         }
 
         $target->setPendingPartyInviteId($party->getId());
+        $botSimulationService->onPartyInviteReceived($target, microtime(true));
         $em->flush();
 
         return $this->json([

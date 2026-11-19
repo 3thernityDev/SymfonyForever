@@ -382,6 +382,11 @@ class SymfonyForeverGame {
     this.worldBossState = resp.worldBoss ?? null;
     this.updateWorldBossHud();
 
+    if (typeof resp.onlineCount === 'number') {
+      const ocEl = document.getElementById('hud-online-count');
+      if (ocEl) ocEl.textContent = `👥 ${resp.onlineCount} en ligne`;
+    }
+
     if (resp.correctedPosition) {
       this.controller.teleport(resp.self.x, resp.self.y, resp.self.z);
     }
@@ -540,6 +545,8 @@ class SymfonyForeverGame {
       line = `<span style="color:#fde047">${this.esc(ev.sourceName)} provoque ${this.esc(ev.targetName)} !</span>`;
     } else if (ev.eventType === 'KILL') {
       line = `<span style="color:#c084fc">${this.esc(ev.targetName)} vaincu ! (+${ev.amount} XP)</span>`;
+    } else if (ev.eventType === 'DEATH') {
+      line = `<span style="color:#f87171">💀 ${this.esc(ev.targetName)} est tombé au combat !</span>`;
     } else if (ev.eventType === 'LEVEL_UP') {
       line = `<span style="color:#fde047">★ ${this.esc(ev.sourceName)} passe Niveau ${ev.amount} !</span>`;
       if (ev.sourceId === this.characterId) {
@@ -785,6 +792,11 @@ class SymfonyForeverGame {
     document.getElementById('btn-party-leave')?.addEventListener('click', async () => {
       await this.net.partyAction('leave', { characterId: this.characterId });
       this.showToast('Vous avez quitté le groupe.');
+    });
+    document.getElementById('btn-target-invite')?.addEventListener('click', async () => {
+      if (this.targetType !== 'PLAYER' || !this.targetId || this.targetId === this.characterId) return;
+      const res = await this.net.partyAction('invite', { characterId: this.characterId, targetCharacterId: this.targetId });
+      this.showToast(res.ok ? (res.message ?? 'Invitation envoyée.') : (res.error ?? 'Échec invitation.'));
     });
   }
 
@@ -1305,10 +1317,12 @@ class SymfonyForeverGame {
 
   private updateTargetHud(): void {
     const frame = document.getElementById('target-frame');
+    const inviteBtn = document.getElementById('btn-target-invite');
     if (!frame) return;
 
     if (!this.targetType || !this.targetId) {
       frame.classList.remove('visible');
+      if (inviteBtn) inviteBtn.style.display = 'none';
       return;
     }
 
@@ -1320,6 +1334,7 @@ class SymfonyForeverGame {
     const aggroEl = document.getElementById('target-aggro');
 
     if (this.targetType === 'MONSTER') {
+      if (inviteBtn) inviteBtn.style.display = 'none';
       const m = this.monsters.get(this.targetId)?.state;
       if (!m || m.state === 'DEAD') {
         this.clearTarget();
@@ -1358,6 +1373,10 @@ class SymfonyForeverGame {
     if (hpFill) hpFill.style.width = `${(p.hp / Math.max(1, p.maxHp)) * 100}%`;
     if (hpText) hpText.textContent = `${p.hp} / ${p.maxHp}`;
     if (aggroEl) aggroEl.textContent = isSelf ? 'Allié (Vous-même)' : 'Allié — Ciblable par le Heal';
+    if (inviteBtn) {
+      const alreadyInParty = Boolean(this.partyState?.members.some((m) => m.id === p.id));
+      inviteBtn.style.display = !isSelf && !p.isDead && !alreadyInParty ? 'block' : 'none';
+    }
   }
 
   private updatePartyHud(pendingInvite: SyncResponse['pendingInvite']): void {
@@ -1524,7 +1543,12 @@ class SymfonyForeverGame {
 
   private appendChatMessage(msg: ChatMessageData): void {
     const tagColor = msg.channel === 'GLOBAL' ? '#38bdf8' : msg.channel === 'PARTY' ? '#34d399' : '#fde047';
-    const html = `<span style="color:${tagColor}">[${msg.channel}]</span> <b>${this.esc(msg.senderName)}</b>: ${this.esc(msg.content)}`;
+    const isInvitablePlayer =
+      msg.channel !== 'SYSTEM' && msg.senderName !== this.selfState?.name && msg.senderName !== 'Système';
+    const senderHtml = isInvitablePlayer
+      ? `<b class="chat-sender-link" data-player-name="${this.esc(msg.senderName)}" style="cursor:pointer; text-decoration:underline dotted;" title="Cliquer pour inviter ${this.esc(msg.senderName)}">${this.esc(msg.senderName)}</b>`
+      : `<b>${this.esc(msg.senderName)}</b>`;
+    const html = `<span style="color:${tagColor}">[${msg.channel}]</span> ${senderHtml}: ${this.esc(msg.content)}`;
     this.chatHistory.push({ channel: msg.channel, html });
     if (this.chatHistory.length > 120) this.chatHistory.shift();
     this.renderChatLog();
@@ -1539,6 +1563,16 @@ class SymfonyForeverGame {
         : this.chatHistory.filter((c) => c.channel === this.activeChatTab || c.channel === 'SYSTEM');
 
     log.innerHTML = filtered.slice(-40).map((c) => `<div class="chat-line">${c.html}</div>`).join('');
+    log.querySelectorAll<HTMLElement>('.chat-sender-link').forEach((el) => {
+      el.addEventListener('click', () => {
+        const name = el.dataset.playerName;
+        const partyInput = document.getElementById('party-invite-input') as HTMLInputElement | null;
+        if (name && partyInput) {
+          partyInput.value = name;
+          partyInput.focus();
+        }
+      });
+    });
     log.scrollTop = log.scrollHeight;
   }
 

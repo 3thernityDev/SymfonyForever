@@ -12,6 +12,7 @@ use App\Repository\ChatMessageRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
 use App\Repository\WorldLootDropRepository;
+use App\Service\Game\BotSimulationService;
 use App\Service\Game\InventoryService;
 use App\Service\Game\QuestService;
 use App\Service\Game\ReunionTerrainService;
@@ -39,6 +40,7 @@ final class WorldSyncController extends AbstractController
         WorldLootDropRepository $lootRepository,
         ReunionTerrainService $terrainService,
         WorldSimulationService $simulationService,
+        BotSimulationService $botSimulationService,
         QuestService $questService,
         InventoryService $inventoryService,
         StatePayloadBuilder $payloadBuilder,
@@ -99,9 +101,11 @@ final class WorldSyncController extends AbstractController
         $questService->onZoneEntered($character, $character->getZoneCode());
         $em->flush();
 
-        // Trigger lazy 1 Hz zone simulation tick under Symfony Lock
+        // Trigger autonomous player-bot simulation, then lazy 1 Hz zone simulation tick under Symfony Lock
         $zoneCode = $character->getZoneCode();
+        $botSimulationService->tick($zoneCode, $now);
         $simulationService->maybeTickZone($zoneCode, $now);
+        $botSimulationService->purgeDeadBots();
 
         // Fetch spatial delta (nearby online players, nearby monsters, recent combat events & chat)
         $nearbyPlayers = $characterRepository->findOnlineNearby(
@@ -151,6 +155,7 @@ final class WorldSyncController extends AbstractController
         return $this->json([
             'serverTime' => round($now, 3),
             'correctedPosition' => $correctedPosition,
+            'onlineCount' => $characterRepository->countOnline($now),
             'self' => $payloadBuilder->buildSelf($character, $now),
             'zone' => WorldCatalog::zones()[$zoneCode] ?? WorldCatalog::zones()['lagon_ouest'],
             'players' => array_map(

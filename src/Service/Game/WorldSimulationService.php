@@ -472,29 +472,7 @@ final class WorldSimulationService
             $createdEvents[] = $ev;
 
             if ($player->getCurrentHp() <= 0) {
-                $player->setCurrentHp(0);
-                $player->setIsDead(true);
-                $player->setActiveEffects([]);
-
-                $deathEv = new CombatEvent(
-                    $player->getZoneCode(),
-                    'DEATH',
-                    'MONSTER',
-                    (int) $monster->getId(),
-                    $template->getName(),
-                    'PLAYER',
-                    (int) $player->getId(),
-                    $player->getName(),
-                    'death',
-                    0,
-                    false,
-                    $player->getPosX(),
-                    $player->getPosY(),
-                    $player->getPosZ(),
-                    $now,
-                );
-                $this->em->persist($deathEv);
-                $createdEvents[] = $deathEv;
+                $this->handlePlayerDeath($player, $monster, $now, $createdEvents);
             }
         }
     }
@@ -558,29 +536,86 @@ final class WorldSimulationService
         $createdEvents[] = $ev;
 
         if ($target->getCurrentHp() <= 0) {
-            $target->setCurrentHp(0);
-            $target->setIsDead(true);
-            $target->setActiveEffects([]);
+            $this->handlePlayerDeath($target, $monster, $now, $createdEvents);
+        }
+    }
 
-            $deathEv = new CombatEvent(
-                $target->getZoneCode(),
-                'DEATH',
-                'MONSTER',
-                (int) $monster->getId(),
-                $template->getName(),
-                'PLAYER',
-                (int) $target->getId(),
-                $target->getName(),
-                'death',
-                0,
-                false,
-                $target->getPosX(),
-                $target->getPosY(),
-                $target->getPosZ(),
-                $now,
+    /**
+     * Applies player defeat state, records DEATH combat event, and enforces permadeath
+     * ungrouping for AI player-bots.
+     *
+     * @param list<CombatEvent> $createdEvents
+     */
+    private function handlePlayerDeath(
+        Character $victim,
+        MonsterInstance $killer,
+        float $now,
+        array &$createdEvents,
+    ): void {
+        $victim->setCurrentHp(0)
+            ->setIsDead(true)
+            ->setActiveEffects([])
+            ->setPendingPartyInviteId(null)
+            ->setIsMoving(false);
+
+        $deathEv = new CombatEvent(
+            $victim->getZoneCode(),
+            'DEATH',
+            'MONSTER',
+            (int) $killer->getId(),
+            $killer->getTemplate()->getName(),
+            'PLAYER',
+            (int) $victim->getId(),
+            $victim->getName(),
+            'death',
+            0,
+            false,
+            $victim->getPosX(),
+            $victim->getPosY(),
+            $victim->getPosZ(),
+            $now,
+        );
+        $this->em->persist($deathEv);
+        $createdEvents[] = $deathEv;
+
+        if (!$victim->isBot()) {
+            return;
+        }
+
+        $victim->setLastSeenAt(0.0)
+            ->setTargetType(null)
+            ->setTargetId(null);
+
+        $party = $victim->getParty();
+        if ($party !== null) {
+            $partyMsg = new ChatMessage(
+                ChatMessage::CHANNEL_PARTY,
+                'Système',
+                '',
+                sprintf('💀 %s (Niv. %d) est tombé au combat — mort définitive, il quitte le groupe.', $victim->getName(), $victim->getLevel()),
+                null,
+                $party->getId(),
             );
-            $this->em->persist($deathEv);
-            $createdEvents[] = $deathEv;
+            $this->em->persist($partyMsg);
+
+            $wasLeader = $party->getLeaderCharacterId() === $victim->getId();
+            $victim->setParty(null);
+
+            if ($party->getMembers()->count() === 0) {
+                $this->em->remove($party);
+            } elseif ($wasLeader) {
+                $newLeader = null;
+                foreach ($party->getMembers() as $member) {
+                    if (!$member->isBot()) {
+                        $newLeader = $member;
+                        break;
+                    }
+                    $newLeader ??= $member;
+                }
+                if ($newLeader instanceof Character) {
+                    $party->setLeaderCharacterId((int) $newLeader->getId());
+                }
+            }
         }
     }
 

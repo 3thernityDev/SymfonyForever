@@ -73,4 +73,72 @@ class CharacterRepository extends ServiceEntityRepository
             ->getQuery()
             ->getOneOrNullResult();
     }
+
+    /**
+     * @return list<Character>
+     */
+    public function findAllBots(): array
+    {
+        /** @var list<Character> $result */
+        $result = $this->createQueryBuilder('c')
+            ->where('c.isBot = true')
+            ->orderBy('c.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+
+        return $result;
+    }
+
+    /**
+     * @return list<Character>
+     */
+    public function findAliveBots(): array
+    {
+        /** @var list<Character> $result */
+        $result = $this->createQueryBuilder('c')
+            ->where('c.isBot = true')
+            ->andWhere('c.isDead = false')
+            ->orderBy('c.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+
+        return $result;
+    }
+
+    /**
+     * @return list<Character>
+     */
+    public function findDeadBots(): array
+    {
+        /** @var list<Character> $result */
+        $result = $this->createQueryBuilder('c')
+            ->where('c.isBot = true')
+            ->andWhere('c.isDead = true')
+            ->getQuery()
+            ->getResult();
+
+        return $result;
+    }
+
+    public function countOnlineHumans(float $now): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->where('c.isBot = false')
+            ->andWhere('c.lastSeenAt >= :cutoff')
+            ->setParameter('cutoff', $now - self::ONLINE_WINDOW_SECONDS)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    public function countOnline(float $now): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->where('c.lastSeenAt >= :cutoff')
+            ->andWhere('c.isDead = false')
+            ->setParameter('cutoff', $now - self::ONLINE_WINDOW_SECONDS)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
 }

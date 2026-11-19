@@ -110,6 +110,9 @@ final class CharacterController extends AbstractController
         if (!$character instanceof Character || $character->getOwner()->getId() !== $user->getId()) {
             return $this->json(['ok' => false, 'error' => 'Personnage non autorisé'], 403);
         }
+        if ($character->isBot()) {
+            return $this->json(['ok' => false, 'error' => 'La mort des bots est définitive.'], 422);
+        }
 
         $zone = $zoneRepository->find($character->getZoneCode());
         $rx = $zone?->getRespawnX() ?? WorldCatalog::zones()['lagon_ouest']['respawnX'];

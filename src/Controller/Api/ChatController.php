@@ -8,6 +8,7 @@ use App\Entity\Character;
 use App\Entity\ChatMessage;
 use App\Entity\User;
 use App\Repository\CharacterRepository;
+use App\Service\Game\BotSimulationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -20,6 +21,7 @@ final class ChatController extends AbstractController
     public function send(
         Request $request,
         CharacterRepository $characterRepository,
+        BotSimulationService $botSimulationService,
         EntityManagerInterface $em,
     ): JsonResponse {
         /** @var User $user */
@@ -59,6 +61,8 @@ final class ChatController extends AbstractController
 
         $em->persist($msg);
         $em->flush();
+
+        $botSimulationService->onPlayerChatMessage($character, $msg, microtime(true));
 
         return $this->json([
             'ok' => true,

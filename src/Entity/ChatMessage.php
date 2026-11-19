@@ -65,6 +65,31 @@ class ChatMessage
         return $this->id;
     }
 
+    public function getChannel(): string
+    {
+        return $this->channel;
+    }
+
+    public function getZoneCode(): ?string
+    {
+        return $this->zoneCode;
+    }
+
+    public function getPartyId(): ?int
+    {
+        return $this->partyId;
+    }
+
+    public function getSenderName(): string
+    {
+        return $this->senderName;
+    }
+
+    public function getContent(): string
+    {
+        return $this->content;
+    }
+
     /**
      * @return array<string, mixed>
      */

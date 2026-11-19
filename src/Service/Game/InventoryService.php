@@ -102,6 +102,14 @@ final class InventoryService
      */
     public function spawnWorldBossLootForParticipants(MonsterInstance $monster, array $participants, float $now): array
     {
+        $participants = array_values(array_filter(
+            $participants,
+            static fn (Character $p): bool => !$p->isBot(),
+        ));
+        if ($participants === []) {
+            return [];
+        }
+
         $tpl = $monster->getTemplate();
         $drops = [];
         $count = max(1, count($participants));
