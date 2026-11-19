@@ -1,0 +1,65 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Inscription — SymfonyForever{% endblock %}
+
+{% block stylesheets %}
+<style>
+    .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem; }
+    .auth-card {
+        width: 100%; max-width: 440px; background: var(--bg-panel); border: 1px solid var(--border);
+        border-radius: 18px; padding: 2rem 2.2rem; box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
+    }
+    .brand { text-align: center; margin-bottom: 1.4rem; }
+    .brand h1 {
+        margin: 0; font-size: 1.85rem;
+        background: linear-gradient(120deg, #e0f2fe, #5eead4 45%, #fb923c);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .brand p { margin: 0.35rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem; }
+    .field input {
+        width: 100%; padding: 0.7rem 0.9rem; border-radius: 10px;
+        border: 1px solid var(--border); background: rgba(5, 13, 21, 0.75);
+        color: var(--text-main); font-size: 0.98rem;
+    }
+    .field input:focus { outline: none; border-color: #14b8a6; }
+    .auth-footer { margin-top: 1.2rem; text-align: center; font-size: 0.9rem; color: var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="brand">
+            <h1>Créer un Compte</h1>
+            <p>Rejoignez le monde 3D multijoueur de La Réunion</p>
+        </div>
+
+        {% if error %}
+            <div class="flash flash-error">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="{{ path('app_register') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('register_form') }}">
+            <div class="field">
+                <label for="username">Nom d'utilisateur</label>
+                <input id="username" name="username" type="text" value="{{ username }}" required minlength="3" maxlength="24" placeholder="ex: PitonRunner">
+            </div>
+            <div class="field">
+                <label for="email">Adresse e-mail</label>
+                <input id="email" name="email" type="email" value="{{ email }}" required placeholder="vous@reunion.re">
+            </div>
+            <div class="field">
+                <label for="password">Mot de passe (6 caractères min.)</label>
+                <input id="password" name="password" type="password" required minlength="6">
+            </div>
+            <button type="submit" class="btn btn-lagoon" style="width: 100%;">Créer mon compte</button>
+        </form>
+
+        <div class="auth-footer">
+            Déjà inscrit ? <a href="{{ path('app_login') }}">Se connecter</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

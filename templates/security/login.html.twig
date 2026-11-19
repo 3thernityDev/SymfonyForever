@@ -1,0 +1,112 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Connexion — SymfonyForever{% endblock %}
+
+{% block stylesheets %}
+<style>
+    .auth-wrap {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+    }
+    .auth-card {
+        width: 100%;
+        max-width: 440px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 2rem 2.2rem;
+        box-shadow: 0 25px 60px rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(12px);
+    }
+    .brand {
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+    .brand-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #5eead4;
+        background: rgba(20, 184, 166, 0.14);
+        border: 1px solid rgba(94, 234, 212, 0.3);
+        padding: 0.25rem 0.7rem;
+        border-radius: 999px;
+        margin-bottom: 0.6rem;
+    }
+    .brand h1 {
+        margin: 0;
+        font-size: 2rem;
+        background: linear-gradient(120deg, #e0f2fe, #5eead4 45%, #fb923c);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .brand p { margin: 0.4rem 0 0; color: var(--text-muted); font-size: 0.92rem; }
+    .map-thumb {
+        width: 112px;
+        height: 112px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid rgba(94, 234, 212, 0.4);
+        margin: 0 auto 0.9rem;
+        display: block;
+        box-shadow: 0 0 28px rgba(20, 184, 166, 0.25);
+    }
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.35rem; }
+    .field input {
+        width: 100%;
+        padding: 0.7rem 0.9rem;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(5, 13, 21, 0.75);
+        color: var(--text-main);
+        font-size: 0.98rem;
+    }
+    .field input:focus { outline: none; border-color: #38bdf8; }
+    .auth-footer { margin-top: 1.3rem; text-align: center; font-size: 0.9rem; color: var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="auth-wrap">
+    <div class="auth-card">
+        <div class="brand">
+            <img src="/assets/map/reunion_minimap.png" alt="Carte de La Réunion" class="map-thumb">
+            <span class="brand-badge">MMO 3D · Île de La Réunion · Symfony HTTP</span>
+            <h1>SymfonyForever</h1>
+            <p>Du Lagon de Saint-Gilles au Cratère Dolomieu</p>
+        </div>
+
+        {% for label, messages in app.flashes %}
+            {% for message in messages %}
+                <div class="flash flash-{{ label }}">{{ message }}</div>
+            {% endfor %}
+        {% endfor %}
+
+        {% if error %}
+            <div class="flash flash-error">Identifiants incorrects. Vérifiez votre pseudo et mot de passe.</div>
+        {% endif %}
+
+        <form method="post" action="{{ path('app_login') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('authenticate') }}">
+            <div class="field">
+                <label for="username">Nom d'utilisateur</label>
+                <input id="username" name="_username" type="text" value="{{ last_username }}" required autofocus autocomplete="username">
+            </div>
+            <div class="field">
+                <label for="password">Mot de passe</label>
+                <input id="password" name="_password" type="password" required autocomplete="current-password">
+            </div>
+            <button type="submit" class="btn btn-lava" style="width: 100%;">Entrer sur l'Île</button>
+        </form>
+
+        <div class="auth-footer">
+            Nouvel aventurier ? <a href="{{ path('app_register') }}">Créer un compte</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

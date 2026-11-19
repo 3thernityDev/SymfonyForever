@@ -1,0 +1,169 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sélection de Personnage — SymfonyForever{% endblock %}
+
+{% block stylesheets %}
+<style>
+    .lobby-shell { max-width: 1220px; margin: 0 auto; padding: 1.6rem 1.4rem 3rem; }
+    .topbar {
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        margin-bottom: 1.6rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border);
+    }
+    .topbar h1 {
+        margin: 0; font-size: 1.7rem;
+        background: linear-gradient(120deg, #e0f2fe, #5eead4 45%, #fb923c);
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1.35fr; gap: 1.5rem; align-items: start; }
+    @media (max-width: 960px) { .grid-2 { grid-template-columns: 1fr; } }
+    .panel {
+        background: var(--bg-panel); border: 1px solid var(--border);
+        border-radius: 16px; padding: 1.4rem; backdrop-filter: blur(10px);
+    }
+    .panel h2 { margin: 0 0 1rem; font-size: 1.15rem; color: #dbeafe; }
+    .char-card {
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: 0.95rem 1rem; border-radius: 12px;
+        background: rgba(6, 15, 24, 0.72); border: 1px solid var(--border);
+        margin-bottom: 0.8rem;
+    }
+    .char-meta h3 { margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
+    .role-pill {
+        font-size: 0.72rem; font-weight: 700; padding: 0.15rem 0.5rem;
+        border-radius: 999px; color: #061018; text-transform: uppercase;
+    }
+    .char-sub { font-size: 0.84rem; color: var(--text-muted); margin-top: 0.25rem; }
+    .char-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+    .class-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.65rem; margin-bottom: 1rem; }
+    .class-option {
+        padding: 0.75rem 0.65rem; border-radius: 12px; cursor: pointer;
+        background: rgba(7, 17, 26, 0.78); border: 2px solid transparent;
+        text-align: center; transition: border-color 0.15s, background 0.15s;
+    }
+    .class-option.active { border-color: var(--cls-color, #38bdf8); background: rgba(255,255,255,0.06); }
+    .class-option strong { display: block; font-size: 0.95rem; }
+    .class-option span { font-size: 0.76rem; color: var(--text-muted); }
+
+    .preview-row { display: grid; grid-template-columns: 220px 1fr; gap: 1rem; margin-bottom: 1rem; }
+    @media (max-width: 640px) { .preview-row { grid-template-columns: 1fr; } }
+    #class-preview-canvas {
+        width: 100%; height: 230px; border-radius: 12px;
+        border: 1px solid var(--border); background: radial-gradient(circle at 50% 35%, #16334c, #07111a);
+        display: block;
+    }
+    .stat-row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.82rem; margin-bottom: 0.35rem; }
+    .stat-row .lbl { width: 85px; color: var(--text-muted); }
+    .stat-bar { flex: 1; height: 7px; background: rgba(255,255,255,0.08); border-radius: 99px; overflow: hidden; }
+    .stat-bar > i { display: block; height: 100%; border-radius: 99px; }
+    .skills-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 0.8rem 0 1rem; }
+    .skill-chip {
+        padding: 0.5rem 0.65rem; border-radius: 10px;
+        background: rgba(5, 13, 21, 0.65); border: 1px solid var(--border);
+        font-size: 0.78rem;
+    }
+    .skill-chip strong { display: block; font-size: 0.83rem; margin-bottom: 0.15rem; }
+    .skill-chip small { color: var(--text-muted); }
+    .create-bar { display: flex; gap: 0.7rem; }
+    .create-bar input[type="text"] {
+        flex: 1; padding: 0.7rem 0.9rem; border-radius: 10px;
+        border: 1px solid var(--border); background: rgba(5, 13, 21, 0.8);
+        color: var(--text-main); font-size: 0.96rem;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="lobby-shell">
+    <div class="topbar">
+        <div>
+            <h1>SymfonyForever</h1>
+            <small style="color: var(--text-muted);">Connecté en tant que <strong>{{ app.user.username }}</strong> · Serveur La Réunion (HTTP)</small>
+        </div>
+        <a href="{{ path('app_logout') }}" class="btn btn-ghost">Déconnexion</a>
+    </div>
+
+    {% for label, messages in app.flashes %}
+        {% for message in messages %}
+            <div class="flash flash-{{ label }}">{{ message }}</div>
+        {% endfor %}
+    {% endfor %}
+
+    <div class="grid-2">
+        <section class="panel">
+            <h2>Vos Personnages ({{ characters|length }}/6)</h2>
+            {% if characters is empty %}
+                <p style="color: var(--text-muted); font-size: 0.92rem;">
+                    Aucun personnage pour l'instant. Choisissez une classe (Tank, DPS ou Heal) à droite pour démarrer votre aventure au Lagon de Saint-Gilles !
+                </p>
+            {% else %}
+                {% for item in characters %}
+                    {% set c = item.entity %}
+                    <div class="char-card">
+                        <div class="char-meta">
+                            <h3>
+                                {{ c.name }}
+                                <span class="role-pill" style="background: {{ item.class.color }}">{{ item.class.roleLabel }}</span>
+                            </h3>
+                            <div class="char-sub">
+                                Niv. {{ c.level }} · {{ item.class.label }} · {{ item.zoneName }}
+                            </div>
+                            <div class="char-sub">
+                                PV {{ c.currentHp }}/{{ item.stats.maxHp }} · PM {{ c.currentMp }}/{{ item.stats.maxMp }}
+                                {% if c.statPoints > 0 %} · <span style="color: var(--accent-gold);">+{{ c.statPoints }} pts stats</span>{% endif %}
+                            </div>
+                        </div>
+                        <div class="char-actions">
+                            <a href="{{ path('app_play', {id: c.id}) }}" class="btn btn-lagoon">Jouer</a>
+                            <form method="post" action="{{ path('app_characters_delete', {id: c.id}) }}" onsubmit="return confirm('Supprimer {{ c.name }} définitivement ?');">
+                                <input type="hidden" name="_csrf_token" value="{{ csrf_token('delete_char_' ~ c.id) }}">
+                                <button type="submit" class="btn btn-danger" title="Supprimer">✕</button>
+                            </form>
+                        </div>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        </section>
+
+        <section class="panel" id="creator-panel" data-classes="{{ classes|json_encode|e('html_attr') }}">
+            <h2>Créer un Nouveau Personnage</h2>
+            <form method="post" action="{{ path('app_characters_create') }}">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token('create_character') }}">
+                <input type="hidden" name="class_code" id="selected-class-input" value="TANK">
+
+                <div class="class-tabs">
+                    {% for cls in classes %}
+                        <button type="button"
+                                class="class-option {% if loop.first %}active{% endif %}"
+                                style="--cls-color: {{ cls.meta.color }}"
+                                data-class-code="{{ cls.meta.code }}">
+                            <strong style="color: {{ cls.meta.color }}">{{ cls.meta.role }}</strong>
+                            <span>{{ cls.meta.label }}</span>
+                        </button>
+                    {% endfor %}
+                </div>
+
+                <div class="preview-row">
+                    <canvas id="class-preview-canvas"></canvas>
+                    <div>
+                        <h3 id="cls-title" style="margin: 0 0 0.3rem;"></h3>
+                        <p id="cls-desc" style="margin: 0 0 0.8rem; font-size: 0.86rem; color: var(--text-muted);"></p>
+                        <div id="cls-stats"></div>
+                    </div>
+                </div>
+
+                <div class="skills-list" id="cls-skills"></div>
+
+                <div class="create-bar">
+                    <input type="text" name="name" required minlength="3" maxlength="20" placeholder="Nom de votre héros (ex: TiKaf, MafateGuard)">
+                    <button type="submit" class="btn btn-lava">Créer & Jouer</button>
+                </div>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+    {{ vite_entry_tags('assets/lobby/main.ts') }}
+{% endblock %}

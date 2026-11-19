@@ -1,0 +1,352 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ character.name }} — SymfonyForever{% endblock %}
+
+{% block stylesheets %}
+<style>
+    html, body { width: 100%; height: 100%; overflow: hidden; user-select: none; }
+    #game-viewport { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+    #floating-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 15; }
+    #hud { position: fixed; inset: 0; pointer-events: none; z-index: 20; font-size: 13px; }
+    .hud-box {
+        pointer-events: auto;
+        background: rgba(9, 19, 30, 0.82);
+        border: 1px solid rgba(148, 189, 224, 0.28);
+        border-radius: 12px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    }
+
+    /* Top-left: Player + Party */
+    .hud-top-left { position: absolute; top: 14px; left: 14px; width: 280px; display: flex; flex-direction: column; gap: 10px; }
+    .unit-frame { padding: 10px 12px; }
+    .unit-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .unit-name { font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+    .lvl-badge { background: rgba(250, 204, 21, 0.18); border: 1px solid rgba(250, 204, 21, 0.5); color: #fde047; padding: 1px 6px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .bar { position: relative; height: 15px; background: rgba(0,0,0,0.55); border-radius: 6px; overflow: hidden; margin-bottom: 5px; border: 1px solid rgba(255,255,255,0.08); }
+    .bar-fill { height: 100%; transition: width 0.2s ease; }
+    .bar-hp .bar-fill { background: linear-gradient(90deg, #16a34a, #22c55e); }
+    .bar-hp-enemy .bar-fill { background: linear-gradient(90deg, #b91c1c, #ef4444); }
+    .bar-mp .bar-fill { background: linear-gradient(90deg, #2563eb, #38bdf8); }
+    .bar-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; text-shadow: 0 1px 2px #000; }
+    .buff-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
+    .buff-pill { font-size: 10px; padding: 2px 6px; border-radius: 6px; background: rgba(56,189,248,0.22); border: 1px solid rgba(56,189,248,0.5); }
+
+    /* Party */
+    .party-box { padding: 9px 11px; }
+    .party-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .party-member {
+        padding: 5px 7px; border-radius: 8px; background: rgba(255,255,255,0.04);
+        margin-bottom: 5px; cursor: pointer; border: 1px solid transparent;
+    }
+    .party-member:hover, .party-member.targeted { border-color: #34d399; background: rgba(16,185,129,0.12); }
+    .party-invite-row { display: flex; gap: 4px; margin-top: 6px; }
+    .party-invite-row input {
+        flex: 1; min-width: 0; padding: 4px 7px; border-radius: 7px;
+        border: 1px solid var(--border); background: rgba(0,0,0,0.45); color: #fff; font-size: 12px;
+    }
+    .mini-btn {
+        padding: 4px 8px; border-radius: 7px; border: 1px solid var(--border);
+        background: rgba(56,189,248,0.2); color: #e0f2fe; cursor: pointer; font-size: 11px; font-weight: 600;
+    }
+    .mini-btn:hover { background: rgba(56,189,248,0.38); }
+    .mini-btn-red { background: rgba(239,68,68,0.22); color: #fecaca; }
+
+    /* Top-center: Target Frame */
+    .hud-target { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 310px; display: none; }
+    .hud-target.visible { display: block; }
+    .aggro-tag { font-size: 11px; color: #fdba74; margin-top: 2px; }
+
+    /* Top-right: Minimap & Zone */
+    .hud-top-right { position: absolute; top: 14px; right: 14px; width: 224px; padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+    .zone-header { display: flex; justify-content: space-between; align-items: center; }
+    .zone-title { font-weight: 700; font-size: 13px; color: #e0f2fe; }
+    .zone-sub { font-size: 11px; color: var(--text-muted); }
+    #minimap-canvas { width: 202px; height: 202px; border-radius: 10px; border: 1px solid rgba(94, 234, 212, 0.35); display: block; }
+    .net-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); }
+    .net-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 4px; }
+    .travel-row { display: flex; gap: 4px; }
+    .travel-row select {
+        flex: 1; min-width: 0; background: rgba(5,13,21,0.85); color: #e2e8f0;
+        border: 1px solid var(--border); border-radius: 7px; padding: 4px 6px; font-size: 11px;
+    }
+
+    /* Bottom-center: Action bar + XP */
+    .hud-bottom-center { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); width: 470px; max-width: calc(100vw - 24px); padding: 10px 12px; }
+    .skills-bar { display: grid; grid-template-columns: repeat(4, 1fr) auto; gap: 8px; align-items: stretch; }
+    .skill-btn {
+        position: relative; overflow: hidden; border-radius: 10px;
+        border: 1px solid rgba(148,189,224,0.35); background: rgba(15, 29, 44, 0.92);
+        color: #fff; padding: 8px 6px; cursor: pointer; text-align: center;
+        display: flex; flex-direction: column; align-items: center; gap: 2px;
+        transition: transform 0.08s, border-color 0.15s;
+    }
+    .skill-btn:hover:not(.locked) { border-color: #5eead4; transform: translateY(-2px); }
+    .skill-btn.locked { opacity: 0.42; cursor: not-allowed; }
+    .skill-key { position: absolute; top: 4px; left: 6px; font-size: 10px; color: #94a3b8; font-weight: 700; }
+    .skill-mana { position: absolute; top: 4px; right: 6px; font-size: 10px; color: #38bdf8; font-weight: 700; }
+    .skill-icon { font-size: 21px; line-height: 1.1; margin-top: 4px; }
+    .skill-name { font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 92px; }
+    .skill-cd-overlay {
+        position: absolute; inset: 0; background: rgba(4, 9, 15, 0.72);
+        display: none; align-items: center; justify-content: center;
+        font-weight: 800; font-size: 16px; color: #fde047;
+    }
+    .skill-btn.on-cd .skill-cd-overlay { display: flex; }
+    .char-sheet-btn {
+        border-radius: 10px; border: 1px solid rgba(250, 204, 21, 0.45);
+        background: rgba(30, 41, 59, 0.9); color: #fde047;
+        padding: 0 11px; cursor: pointer; font-weight: 700; font-size: 12px;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    }
+    .char-sheet-btn.has-points { animation: pulseGold 1.4s infinite; }
+    @keyframes pulseGold { 0%,100% { box-shadow: 0 0 0 0 rgba(250,204,21,0.5); } 50% { box-shadow: 0 0 14px 3px rgba(250,204,21,0.55); } }
+    .xp-bar { margin-top: 8px; height: 10px; background: rgba(0,0,0,0.6); border-radius: 99px; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.1); }
+    .xp-fill { height: 100%; background: linear-gradient(90deg, #9333ea, #c084fc, #facc15); transition: width 0.3s ease; }
+    .xp-text { position: absolute; inset: 0; font-size: 9px; display: flex; align-items: center; justify-content: center; font-weight: 700; text-shadow: 0 1px 2px #000; }
+
+    /* Bottom-left: Chat */
+    .hud-chat { position: absolute; bottom: 14px; left: 14px; width: 320px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+    .chat-tabs { display: flex; gap: 4px; }
+    .chat-tab {
+        flex: 1; padding: 3px 6px; border-radius: 6px; border: 1px solid transparent;
+        background: rgba(255,255,255,0.05); color: var(--text-muted); cursor: pointer; font-size: 11px;
+    }
+    .chat-tab.active { background: rgba(20, 184, 166, 0.25); border-color: rgba(94,234,212,0.5); color: #fff; }
+    .chat-log { height: 132px; overflow-y: auto; font-size: 12px; line-height: 1.38; padding-right: 4px; }
+    .chat-line { margin-bottom: 3px; word-break: break-word; }
+    .chat-form { display: flex; gap: 5px; }
+    .chat-form input {
+        flex: 1; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--border);
+        background: rgba(0,0,0,0.55); color: #fff; font-size: 12px;
+    }
+
+    /* Bottom-right: Controls hint */
+    .hud-controls {
+        position: absolute; bottom: 14px; right: 14px; padding: 8px 10px;
+        font-size: 11px; color: var(--text-muted); line-height: 1.5; max-width: 240px;
+    }
+    .hud-controls kbd {
+        background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+        border-radius: 4px; padding: 0 4px; color: #e2e8f0; font-family: inherit; font-size: 10px;
+    }
+
+    /* Zone Banner & Toast */
+    #zone-banner {
+        position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
+        text-align: center; opacity: 0; transition: opacity 0.5s ease; pointer-events: none;
+    }
+    #zone-banner.show { opacity: 1; }
+    #zone-banner h2 { margin: 0; font-size: 26px; letter-spacing: 0.06em; text-shadow: 0 3px 14px rgba(0,0,0,0.85); color: #fef3c7; }
+    #zone-banner p { margin: 2px 0 0; font-size: 13px; color: #bae6fd; text-shadow: 0 2px 8px rgba(0,0,0,0.85); }
+    #toast {
+        position: absolute; bottom: 128px; left: 50%; transform: translateX(-50%);
+        background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(251, 146, 60, 0.6);
+        color: #fed7aa; padding: 6px 14px; border-radius: 999px; font-weight: 600;
+        opacity: 0; transition: opacity 0.25s; pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+
+    /* Floating Combat Text & Nameplates */
+    .fct {
+        position: absolute; font-weight: 800; text-shadow: 0 2px 4px #000;
+        transform: translate(-50%, -50%); white-space: nowrap;
+        animation: floatUp 1.2s ease-out forwards;
+    }
+    @keyframes floatUp {
+        0% { opacity: 1; transform: translate(-50%, -50%) scale(0.9); }
+        25% { opacity: 1; transform: translate(-50%, -85%) scale(1.15); }
+        100% { opacity: 0; transform: translate(-50%, -170%) scale(0.95); }
+    }
+    .nameplate {
+        position: absolute; transform: translate(-50%, -100%);
+        text-align: center; white-space: nowrap; pointer-events: none;
+    }
+    .np-label { font-size: 11px; font-weight: 700; text-shadow: 0 1px 3px #000, 0 0 6px #000; padding: 1px 5px; border-radius: 4px; }
+    .np-hp { width: 64px; height: 5px; background: rgba(0,0,0,0.75); border-radius: 3px; margin: 2px auto 0; overflow: hidden; border: 1px solid rgba(255,255,255,0.2); }
+    .np-hp > i { display: block; height: 100%; }
+
+    /* Modals */
+    .modal-backdrop {
+        position: fixed; inset: 0; background: rgba(2, 6, 12, 0.68);
+        display: none; align-items: center; justify-content: center; z-index: 40; pointer-events: auto;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-card {
+        width: 430px; max-width: 92vw; padding: 1.4rem;
+        background: #0b1824; border: 1px solid rgba(148,189,224,0.35); border-radius: 16px;
+        box-shadow: 0 24px 60px rgba(0,0,0,0.65);
+    }
+    .attr-row {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 7px 10px; border-radius: 9px; background: rgba(255,255,255,0.04); margin-bottom: 6px;
+    }
+    .derived-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+    .derived-grid strong { color: #e2e8f0; }
+
+    #loading-screen {
+        position: fixed; inset: 0; z-index: 60; background: #07111a;
+        display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block body %}
+<div id="loading-screen">
+    <h1 style="margin:0; font-size:2rem; color:#5eead4;">SymfonyForever</h1>
+    <p id="loading-status" style="color:#93adc2; margin:0;">Chargement du relief 3D de La Réunion...</p>
+</div>
+
+<canvas id="game-viewport"
+        data-character-id="{{ character.id }}"
+        data-character-name="{{ character.name|e('html_attr') }}"
+        data-class-code="{{ character.classCode }}"></canvas>
+
+<div id="floating-layer"></div>
+
+<div id="hud">
+    <!-- Top Left: Player & Party -->
+    <div class="hud-top-left">
+        <div class="hud-box unit-frame">
+            <div class="unit-head">
+                <div class="unit-name">
+                    <span id="hud-class-dot" style="width:10px;height:10px;border-radius:50%;display:inline-block;background:#38bdf8;"></span>
+                    <span id="hud-name">{{ character.name }}</span>
+                </div>
+                <span class="lvl-badge">Niv. <span id="hud-level">{{ character.level }}</span></span>
+            </div>
+            <div class="bar bar-hp"><div class="bar-fill" id="hud-hp-fill" style="width:100%"></div><div class="bar-label" id="hud-hp-text">-- / --</div></div>
+            <div class="bar bar-mp"><div class="bar-fill" id="hud-mp-fill" style="width:100%"></div><div class="bar-label" id="hud-mp-text">-- / --</div></div>
+            <div class="buff-row" id="hud-buffs"></div>
+        </div>
+
+        <div class="hud-box party-box">
+            <div class="party-head">
+                <span>Groupe (Tank · DPS · Heal)</span>
+                <button class="mini-btn mini-btn-red" id="btn-party-leave" style="display:none;">Quitter</button>
+            </div>
+            <div id="party-invite-banner" style="display:none; margin-bottom:6px; padding:6px; border-radius:8px; background:rgba(20,184,166,0.18); border:1px solid #2dd4bf;">
+                <div style="font-size:11px; margin-bottom:4px;" id="party-invite-text">Invitation de groupe</div>
+                <div style="display:flex; gap:5px;">
+                    <button class="mini-btn" id="btn-party-accept">Accepter</button>
+                    <button class="mini-btn mini-btn-red" id="btn-party-decline">Refuser</button>
+                </div>
+            </div>
+            <div id="party-members"><div style="color:var(--text-muted); font-size:11px;">En solo — invitez un joueur pour partager l'XP (+10%/allié) et affronter le Dolomieu.</div></div>
+            <form class="party-invite-row" id="party-invite-form">
+                <input type="text" id="party-invite-input" placeholder="Inviter un joueur...">
+                <button type="submit" class="mini-btn">+ Inviter</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Top Center: Target -->
+    <div class="hud-box unit-frame hud-target" id="target-frame">
+        <div class="unit-head">
+            <div class="unit-name" id="target-name">Cible</div>
+            <span class="lvl-badge" id="target-lvl">Niv. 1</span>
+        </div>
+        <div class="bar bar-hp-enemy" id="target-hp-bar"><div class="bar-fill" id="target-hp-fill" style="width:100%"></div><div class="bar-label" id="target-hp-text">--</div></div>
+        <div class="aggro-tag" id="target-aggro"></div>
+    </div>
+
+    <!-- Top Right: Minimap -->
+    <div class="hud-box hud-top-right">
+        <div class="zone-header">
+            <div>
+                <div class="zone-title" id="zone-name">Lagon de l'Ouest</div>
+                <div class="zone-sub" id="zone-sub">Niv. 1–3</div>
+            </div>
+            <a href="{{ path('app_characters') }}" class="mini-btn" title="Retour au Lobby">Lobby</a>
+        </div>
+        <canvas id="minimap-canvas" width="202" height="202"></canvas>
+        <div class="travel-row">
+            <select id="travel-select" title="Relais des Cirques (Voyage rapide hors combat)"></select>
+            <button type="button" class="mini-btn" id="btn-travel">Voyager</button>
+        </div>
+        <div class="net-row">
+            <span><i class="net-dot" id="net-dot"></i><span id="net-ping">HTTP Sync</span></span>
+            <span id="hud-coords">0, 0</span>
+        </div>
+    </div>
+
+    <!-- Zone Banner & Toast -->
+    <div id="zone-banner">
+        <h2 id="zone-banner-title">Lagon de l'Ouest</h2>
+        <p id="zone-banner-sub">Saint-Gilles &amp; Ermitage · Niv. 1–3</p>
+    </div>
+    <div id="toast"></div>
+
+    <!-- Bottom Center: Skills + XP -->
+    <div class="hud-box hud-bottom-center">
+        <div class="skills-bar">
+            <button type="button" class="skill-btn" data-slot="1" id="skill-slot-1"></button>
+            <button type="button" class="skill-btn" data-slot="2" id="skill-slot-2"></button>
+            <button type="button" class="skill-btn" data-slot="3" id="skill-slot-3"></button>
+            <button type="button" class="skill-btn" data-slot="4" id="skill-slot-4"></button>
+            <button type="button" class="char-sheet-btn" id="btn-char-sheet" title="Fiche Personnage (C)">
+                <span>Stats</span>
+                <small id="stat-pts-badge">[C]</small>
+            </button>
+        </div>
+        <div class="xp-bar">
+            <div class="xp-fill" id="hud-xp-fill" style="width:0%"></div>
+            <div class="xp-text" id="hud-xp-text">XP 0 / 100</div>
+        </div>
+    </div>
+
+    <!-- Bottom Left: Chat -->
+    <div class="hud-box hud-chat">
+        <div class="chat-tabs">
+            <button type="button" class="chat-tab active" data-channel="ZONE">Zone</button>
+            <button type="button" class="chat-tab" data-channel="GLOBAL">Global</button>
+            <button type="button" class="chat-tab" data-channel="PARTY">Groupe</button>
+            <button type="button" class="chat-tab" data-channel="COMBAT">Combat</button>
+        </div>
+        <div class="chat-log" id="chat-log"></div>
+        <form class="chat-form" id="chat-form">
+            <input type="text" id="chat-input" maxlength="260" placeholder="Message (Entrée pour parler)...">
+            <button type="submit" class="mini-btn">Envoyer</button>
+        </form>
+    </div>
+
+    <!-- Bottom Right: Controls -->
+    <div class="hud-box hud-controls">
+        <div><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> Déplacer · <kbd>Espace</kbd> Sauter</div>
+        <div><kbd>Clic droit</kbd> Caméra · <kbd>Molette</kbd> Zoom</div>
+        <div><kbd>Tab</kbd> / <kbd>Clic</kbd> Cibler · <kbd>1</kbd>-<kbd>4</kbd> Sorts</div>
+        <div><kbd>C</kbd> Fiche &amp; Stats · <kbd>F1</kbd> Se cibler</div>
+    </div>
+</div>
+
+<!-- Character Stats Modal -->
+<div class="modal-backdrop" id="char-modal">
+    <div class="modal-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 style="margin:0; font-size:1.2rem;">Fiche de <span id="modal-char-name"></span></h2>
+            <button type="button" class="mini-btn" id="btn-close-char-modal">Fermer (C)</button>
+        </div>
+        <div style="font-size:0.88rem; color:var(--text-muted); margin-bottom:12px;">
+            Niveau <strong id="modal-lvl" style="color:#fde047;">1</strong> ·
+            Points à répartir : <strong id="modal-stat-pts" style="color:#34d399;">0</strong>
+        </div>
+        <div id="modal-attributes"></div>
+        <div class="derived-grid" id="modal-derived"></div>
+    </div>
+</div>
+
+<!-- Death Modal -->
+<div class="modal-backdrop" id="death-modal">
+    <div class="modal-card" style="text-align:center;">
+        <h2 style="margin:0 0 8px; color:#f87171;">Vous avez été vaincu !</h2>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin:0 0 16px;">
+            L'esprit de l'île vous ramènera au camp sûr de votre zone sans perte de niveau.
+        </p>
+        <button type="button" class="btn btn-lagoon" id="btn-respawn" style="width:100%;">Ressusciter au Camp</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+    {{ vite_entry_tags('assets/game/main.ts') }}
+{% endblock %}
