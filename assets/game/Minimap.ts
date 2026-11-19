@@ -1,4 +1,4 @@
-import type { LandmarkMeta, MonsterState, PublicPlayer } from './types';
+import type { LandmarkMeta, MonsterState, NpcData, PublicPlayer, QuestStatePayload } from './types';
 
 export class Minimap {
   private readonly ctx: CanvasRenderingContext2D;
@@ -28,6 +28,9 @@ export class Minimap {
     partyId: number | null,
     players: PublicPlayer[],
     monsters: MonsterState[],
+    npcs: NpcData[],
+    quests: QuestStatePayload | null,
+    timeSec: number,
   ): void {
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -49,10 +52,41 @@ export class Minimap {
     // Landmarks
     for (const lm of this.landmarks) {
       const [lx, ly] = toPx(lm.x, lm.z);
-      ctx.fillStyle = lm.type === 'boss' ? '#ff4500' : lm.type === 'hub' ? '#2dd4bf' : '#fde047';
+      ctx.fillStyle = lm.type === 'boss' ? '#ff4500' : lm.type === 'hub' ? '#2dd4bf' : 'rgba(253,224,71,0.5)';
       ctx.beginPath();
-      ctx.arc(lx, ly, lm.type === 'boss' ? 3.5 : 2.3, 0, Math.PI * 2);
+      ctx.arc(lx, ly, lm.type === 'boss' ? 3.2 : 1.8, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Active Quest Guidance Pulsing Ring
+    if (quests?.guidance) {
+      const [gx, gy] = toPx(quests.guidance.x, quests.guidance.z);
+      const pulse = 5.5 + Math.sin(timeSec * 5.0) * 2.5;
+      ctx.strokeStyle = quests.guidance.mode === 'TURN_IN' ? '#34d399' : '#facc15';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(gx, gy, pulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Quest NPCs
+    for (const npc of npcs) {
+      const marker = quests?.npcMarkers[npc.code] ?? 'NONE';
+      const [nx, ny] = toPx(npc.x, npc.z);
+      if (marker === 'TURN_IN' || marker === 'AVAILABLE') {
+        ctx.fillStyle = marker === 'TURN_IN' ? '#34d399' : '#fde047';
+        ctx.strokeStyle = '#07111a';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 4.0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#fef3c7';
+        ctx.beginPath();
+        ctx.arc(nx, ny, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Nearby Monsters

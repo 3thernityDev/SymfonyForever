@@ -57,8 +57,35 @@
     .hud-target.visible { display: block; }
     .aggro-tag { font-size: 11px; color: #fdba74; margin-top: 2px; }
 
-    /* Top-right: Minimap & Zone */
-    .hud-top-right { position: absolute; top: 14px; right: 14px; width: 224px; padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+    /* Top-right: Minimap, Zone & Quest Tracker */
+    .hud-top-right-col { position: absolute; top: 14px; right: 14px; width: 230px; display: flex; flex-direction: column; gap: 8px; }
+    .hud-top-right { padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+    .quest-tracker { padding: 9px 11px; font-size: 12px; }
+    .qt-head { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #fde047; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+    .qt-item { padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,0.04); border-left: 3px solid #facc15; margin-bottom: 5px; }
+    .qt-item.ready { border-left-color: #34d399; background: rgba(16,185,129,0.14); }
+    .qt-item-title { font-weight: 700; color: #fef3c7; font-size: 12px; margin-bottom: 2px; }
+    .qt-item-obj { font-size: 11px; color: #cbd5e1; }
+    .qt-dist { font-size: 10px; color: #5eead4; margin-top: 3px; }
+
+    #npc-interact-prompt {
+        position: absolute; bottom: 162px; left: 50%; transform: translateX(-50%);
+        background: rgba(11, 24, 38, 0.92); border: 1px solid rgba(250, 204, 21, 0.65);
+        color: #fef08a; padding: 6px 14px; border-radius: 999px; font-weight: 600; font-size: 12px;
+        display: none; pointer-events: auto; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    #npc-interact-prompt.visible { display: inline-flex; align-items: center; gap: 6px; }
+
+    .quest-card-modal {
+        padding: 10px 12px; border-radius: 10px; margin-bottom: 9px;
+        background: rgba(255,255,255,0.04); border: 1px solid rgba(148,189,224,0.22);
+    }
+    .quest-card-modal.ready { border-color: rgba(52,211,153,0.55); background: rgba(16,185,129,0.1); }
+    .quest-card-modal.available { border-color: rgba(250,204,21,0.55); background: rgba(250,204,21,0.07); }
+    .quest-card-modal h4 { margin: 0 0 4px; font-size: 0.98rem; color: #fef3c7; display: flex; justify-content: space-between; align-items: center; }
+    .quest-card-modal p { margin: 0 0 8px; font-size: 0.84rem; color: var(--text-muted); line-height: 1.45; }
+    .quest-reward-line { font-size: 0.8rem; color: #c084fc; margin-bottom: 8px; font-weight: 600; }
+
     .zone-header { display: flex; justify-content: space-between; align-items: center; }
     .zone-title { font-weight: 700; font-size: 13px; color: #e0f2fe; }
     .zone-sub { font-size: 11px; color: var(--text-muted); }
@@ -250,25 +277,38 @@
         <div class="aggro-tag" id="target-aggro"></div>
     </div>
 
-    <!-- Top Right: Minimap -->
-    <div class="hud-box hud-top-right">
-        <div class="zone-header">
-            <div>
-                <div class="zone-title" id="zone-name">Lagon de l'Ouest</div>
-                <div class="zone-sub" id="zone-sub">Niv. 1–3</div>
+    <!-- Top Right: Minimap & Quest Tracker -->
+    <div class="hud-top-right-col">
+        <div class="hud-box hud-top-right">
+            <div class="zone-header">
+                <div>
+                    <div class="zone-title" id="zone-name">Lagon de l'Ouest</div>
+                    <div class="zone-sub" id="zone-sub">Niv. 1–3</div>
+                </div>
+                <a href="{{ path('app_characters') }}" class="mini-btn" title="Retour au Lobby">Lobby</a>
             </div>
-            <a href="{{ path('app_characters') }}" class="mini-btn" title="Retour au Lobby">Lobby</a>
+            <canvas id="minimap-canvas" width="208" height="208"></canvas>
+            <div class="travel-row">
+                <select id="travel-select" title="Relais des Cirques (Voyage rapide hors combat)"></select>
+                <button type="button" class="mini-btn" id="btn-travel">Voyager</button>
+            </div>
+            <div class="net-row">
+                <span><i class="net-dot" id="net-dot"></i><span id="net-ping">HTTP Sync</span></span>
+                <span id="hud-coords">0, 0</span>
+            </div>
         </div>
-        <canvas id="minimap-canvas" width="202" height="202"></canvas>
-        <div class="travel-row">
-            <select id="travel-select" title="Relais des Cirques (Voyage rapide hors combat)"></select>
-            <button type="button" class="mini-btn" id="btn-travel">Voyager</button>
-        </div>
-        <div class="net-row">
-            <span><i class="net-dot" id="net-dot"></i><span id="net-ping">HTTP Sync</span></span>
-            <span id="hud-coords">0, 0</span>
+
+        <div class="hud-box quest-tracker" id="quest-tracker">
+            <div class="qt-head">
+                <span>📜 Quêtes de l'Île</span>
+                <span id="qt-counter" style="color:#93adc2;">0/10</span>
+            </div>
+            <div id="qt-body"></div>
         </div>
     </div>
+
+    <!-- NPC Proximity Interact Prompt -->
+    <button type="button" id="npc-interact-prompt">💬 Appuyez sur [E] pour parler</button>
 
     <!-- Zone Banner & Toast -->
     <div id="zone-banner">
@@ -315,7 +355,22 @@
         <div><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> Déplacer · <kbd>Espace</kbd> Sauter</div>
         <div><kbd>Clic droit</kbd> Caméra · <kbd>Molette</kbd> Zoom</div>
         <div><kbd>Tab</kbd> / <kbd>Clic</kbd> Cibler · <kbd>1</kbd>-<kbd>4</kbd> Sorts</div>
-        <div><kbd>C</kbd> Fiche &amp; Stats · <kbd>F1</kbd> Se cibler</div>
+        <div><kbd>E</kbd> Parler PNJ · <kbd>C</kbd> Stats · <kbd>F1</kbd> Soi</div>
+    </div>
+</div>
+
+<!-- NPC Quest Dialogue Modal -->
+<div class="modal-backdrop" id="npc-modal">
+    <div class="modal-card" style="width:490px; max-height:84vh; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px;">
+            <div>
+                <h2 style="margin:0; font-size:1.22rem; color:#fde047;" id="npc-modal-name">PNJ</h2>
+                <div style="font-size:0.8rem; color:#5eead4;" id="npc-modal-title"></div>
+            </div>
+            <button type="button" class="mini-btn" id="btn-close-npc-modal">Fermer (Échap)</button>
+        </div>
+        <p id="npc-modal-greeting" style="margin:0 0 14px; font-size:0.88rem; color:#e2e8f0; font-style:italic; background:rgba(255,255,255,0.04); padding:9px 11px; border-radius:9px;"></p>
+        <div id="npc-modal-quests"></div>
     </div>
 </div>
 

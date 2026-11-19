@@ -298,3 +298,74 @@ export function createMonsterMesh(meshKey: string, primaryColor: string, scale: 
 
   return { group, body, targetRing, hitFlash: 0 };
 }
+
+export interface NpcVisual {
+  group: THREE.Group;
+  markerMesh: THREE.Mesh;
+  markerMat: THREE.MeshStandardMaterial;
+}
+
+export function createNpcMesh(coatColor: string, accentColor: string): NpcVisual {
+  const group = new THREE.Group();
+
+  const skinMat = mat(0xd49b72, 0.7, 0.05);
+  const coatMat = mat(coatColor, 0.65, 0.12);
+  const accMat = mat(accentColor, 0.4, 0.25, accentColor);
+
+  // Robe / lower tunic
+  const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.62, 1.05, 8), coatMat);
+  skirt.position.y = 0.55;
+  group.add(skirt);
+
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.98, 0.52), coatMat);
+  torso.position.y = 1.48;
+  group.add(torso);
+
+  // Sash / scarf
+  const sash = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.22, 0.56), accMat);
+  sash.position.y = 1.88;
+  group.add(sash);
+
+  // Head + straw/island explorer hat
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.54, 0.54), skinMat);
+  head.position.y = 2.28;
+  group.add(head);
+
+  const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.68, 0.72, 0.08, 10), mat(0xeab308, 0.85, 0.05));
+  hatBrim.position.y = 2.58;
+  const hatCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.4, 0.28, 8), mat(0xca8a04, 0.85, 0.05));
+  hatCrown.position.y = 2.74;
+  group.add(hatBrim, hatCrown);
+
+  // Guiding lantern staff on right side
+  const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 2.5, 6), mat(0x78350f));
+  staff.position.set(0.62, 1.25, 0.24);
+  const lantern = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), accMat);
+  lantern.position.set(0.62, 2.58, 0.24);
+  group.add(staff, lantern);
+
+  // Warm ground halo ring
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(1.05, 1.32, 24),
+    new THREE.MeshBasicMaterial({ color: 0xfacc15, side: THREE.DoubleSide, transparent: true, opacity: 0.55 }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.09;
+  group.add(ring);
+
+  // Floating 3D quest marker crystal above NPC's head
+  const markerMat = new THREE.MeshStandardMaterial({
+    color: 0xfacc15,
+    emissive: 0xfacc15,
+    emissiveIntensity: 0.9,
+    roughness: 0.2,
+    flatShading: true,
+  });
+  const markerMesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.38, 0), markerMat);
+  markerMesh.position.y = 3.7;
+  markerMesh.visible = false;
+  group.add(markerMesh);
+
+  return { group, markerMesh, markerMat };
+}

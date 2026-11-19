@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="fr" data-bs-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Étudiants Réunionnais</title>
+    <!-- Bootstrap 5.3.8 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <style>
+      :root {
+        --accent-volcan: #ff5e3a;
+        --accent-lagon: #00f2fe;
+        --accent-sun: #fbbf24;
+        --glass-bg: rgba(13, 20, 38, 0.62);
+        --glass-border: rgba(255, 255, 255, 0.12);
+      }
+
+      * {
+        font-family: 'Outfit', sans-serif;
+      }
+
+      body {
+        min-height: 100vh;
+        background-color: #050811;
+        color: #f8fafc;
+        overflow-x: hidden;
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      /* Fond Parallax Multi-Couches */
+      .parallax-bg {
+        position: fixed;
+        inset: 0;
+        z-index: -3;
+        background:
+          radial-gradient(circle at 20% 35%, rgba(255, 94, 58, 0.24) 0%, transparent 45%),
+          radial-gradient(circle at 80% 25%, rgba(0, 242, 254, 0.2) 0%, transparent 45%),
+          radial-gradient(circle at 50% 85%, rgba(251, 191, 36, 0.12) 0%, transparent 50%),
+          linear-gradient(180deg, #04070f 0%, #0a1122 55%, #050811 100%);
+      }
+
+      .parallax-grid {
+        position: fixed;
+        inset: -15%;
+        z-index: -2;
+        background-image:
+          linear-gradient(rgba(0, 242, 254, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 94, 58, 0.045) 1px, transparent 1px);
+        background-size: 54px 54px;
+        transform: perspective(650px) rotateX(28deg);
+        transform-origin: center top;
+        pointer-events: none;
+        transition: transform 0.12s ease-out;
+      }
+
+      #particles-canvas {
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+      }
+
+      /* Orbes Lumineuses Parallax */
+      .floating-orb {
+        position: fixed;
+        border-radius: 50%;
+        filter: blur(80px);
+        opacity: 0.5;
+        z-index: -2;
+        pointer-events: none;
+        transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .orb-volcan {
+        width: 420px;
+        height: 420px;
+        background: var(--accent-volcan);
+        top: -100px;
+        left: -120px;
+      }
+
+      .orb-lagon {
+        width: 460px;
+        height: 460px;
+        background: var(--accent-lagon);
+        bottom: -140px;
+        right: -120px;
+      }
+
+      /* Titre Principal */
+      .hero-title {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, #ffffff 0%, #7dd3fc 50%, #ff7e5f 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 8px 24px rgba(0, 242, 254, 0.18));
+      }
+
+      /* Scène 3D Intégrée (Sans boîte ni bordure) */
+      .tikaf-stage {
+        position: relative;
+        height: 580px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* Halo lumineux derrière Tikaf */
+      .tikaf-aura {
+        position: absolute;
+        width: 340px;
+        height: 340px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 242, 254, 0.28) 0%, rgba(255, 94, 58, 0.18) 50%, transparent 72%);
+        filter: blur(28px);
+        pointer-events: none;
+        z-index: 0;
+        animation: auraPulse 4s ease-in-out infinite alternate;
+      }
+
+      @keyframes auraPulse {
+        0% {
+          transform: scale(0.92);
+          opacity: 0.75;
+        }
+        100% {
+          transform: scale(1.08);
+          opacity: 1;
+        }
+      }
+
+      #tikaf-canvas-container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        z-index: 2;
+        cursor: grab;
+      }
+
+      #tikaf-canvas-container:active {
+        cursor: grabbing;
+      }
+
+      .stage-loader {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 5;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+      }
+
+      .stage-loader.hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+
+      /* Bulle Style BD (Comic Speech Bubble) */
+      .comic-bubble {
+        position: absolute;
+        top: 14%;
+        right: 2%;
+        z-index: 15;
+        background-color: #ffffff;
+        background-image: radial-gradient(rgba(15, 23, 42, 0.08) 1.25px, transparent 1.25px);
+        background-size: 8px 8px;
+        color: #090d16;
+        border: 3.5px solid #090d16;
+        border-radius: 1.35rem;
+        padding: 0.75rem 1.25rem;
+        min-width: 165px;
+        max-width: 240px;
+        text-align: center;
+        box-shadow:
+          6px 6px 0px var(--accent-volcan),
+          10px 10px 0px rgba(0, 242, 254, 0.5);
+        pointer-events: none;
+        opacity: 0;
+        transform: scale(0.4) translate(-15px, 15px) rotate(-6deg);
+        transform-origin: bottom left;
+        transition:
+          opacity 0.18s ease,
+          transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+      }
+
+      .comic-bubble.visible {
+        opacity: 1;
+        transform: scale(1) translate(0, 0) rotate(-3deg);
+      }
+
+      /* Pointe de la bulle BD dirigée vers Tikaf */
+      .comic-bubble::before {
+        content: "";
+        position: absolute;
+        bottom: -21px;
+        left: 22px;
+        border-width: 21px 18px 0 0;
+        border-style: solid;
+        border-color: #090d16 transparent transparent transparent;
+        transform: skewX(-18deg);
+      }
+
+      .comic-bubble::after {
+        content: "";
+        position: absolute;
+        bottom: -14px;
+        left: 25px;
+        border-width: 16px 14px 0 0;
+        border-style: solid;
+        border-color: #ffffff transparent transparent transparent;
+        transform: skewX(-18deg);
+      }
+
+      .comic-bubble-text {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 1.05rem;
+        line-height: 1.2;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        color: #090d16;
+      }
+
+      /* Carte Glassmorphism avec Reflet Dynamique */
+      .glass-card {
+        position: relative;
+        background: var(--glass-bg);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid var(--glass-border);
+        border-radius: 1.5rem;
+        box-shadow:
+          0 25px 55px -12px rgba(0, 0, 0, 0.7),
+          inset 0 1px 1px rgba(255, 255, 255, 0.16);
+        transition: transform 0.2s ease-out, box-shadow 0.25s ease, border-color 0.25s ease;
+        overflow: hidden;
+      }
+
+      .glass-card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+          600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+          rgba(0, 242, 254, 0.08),
+          transparent 40%
+        );
+        pointer-events: none;
+      }
+
+      .glass-card:hover {
+        border-color: rgba(0, 242, 254, 0.32);
+        box-shadow:
+          0 30px 65px -12px rgba(0, 0, 0, 0.82),
+          0 0 30px rgba(0, 242, 254, 0.12);
+      }
+
+      /* Tableau Customisé */
+      .table-cyber {
+        --bs-table-bg: transparent;
+        --bs-table-color: #e2e8f0;
+        --bs-table-border-color: rgba(255, 255, 255, 0.07);
+      }
+
+      .table-cyber thead th {
+        background: rgba(15, 23, 42, 0.75);
+        color: #94a3b8;
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 0.8rem;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid rgba(0, 242, 254, 0.25);
+        padding: 1rem;
+      }
+
+      .table-cyber tbody tr {
+        transition: transform 0.2s ease, background-color 0.2s ease;
+      }
+
+      .table-cyber tbody tr:hover {
+        background: linear-gradient(90deg, rgba(0, 242, 254, 0.1) 0%, rgba(255, 94, 58, 0.06) 100%) !important;
+        transform: translateX(4px);
+      }
+
+      @keyframes rowFadeSlide {
+        from {
+          opacity: 0;
+          transform: translateY(8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .student-row-anim {
+        animation: rowFadeSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      }
+
+      /* Avatar Initiales */
+      .student-avatar {
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.85rem;
+        color: #fff;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+      }
+
+      /* Pagination Néon */
+      .pagination-cyber .page-link {
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: #cbd5e1;
+        margin: 0 3px;
+        border-radius: 0.65rem !important;
+        transition: all 0.2s ease;
+      }
+
+      .pagination-cyber .page-link:hover {
+        background: rgba(0, 242, 254, 0.15);
+        border-color: var(--accent-lagon);
+        color: #fff;
+        transform: translateY(-2px);
+      }
+
+      .pagination-cyber .page-item.active .page-link {
+        background: linear-gradient(135deg, var(--accent-volcan), #ff2a6d);
+        border-color: transparent;
+        color: #fff;
+        box-shadow: 0 0 16px rgba(255, 94, 58, 0.55);
+      }
+
+      .pagination-cyber .page-item.disabled .page-link {
+        opacity: 0.35;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Arrière-plan Parallax & Particules -->
+    <div class="parallax-bg"></div>
+    <div class="parallax-grid" id="parallax-grid"></div>
+    <div class="floating-orb orb-volcan" data-parallax-speed="0.04"></div>
+    <div class="floating-orb orb-lagon" data-parallax-speed="-0.05"></div>
+    <canvas id="particles-canvas"></canvas>
+
+    <main class="container py-4">
+      <div class="row g-4 align-items-center">
+        
+        <!-- Colonne Modèle 3D Tikaf intégré directement dans la scène -->
+        <div class="col-12 col-lg-5">
+          <div class="tikaf-stage parallax-layer" data-parallax-speed="0.018">
+            <div class="tikaf-aura"></div>
+
+            <!-- Bulle style BD affichée au survol d'un étudiant -->
+            <div class="comic-bubble" id="tikaf-comic-bubble" role="status" aria-live="polite">
+              <div class="comic-bubble-text" id="tikaf-comic-text"></div>
+            </div>
+
+            <!-- Spinner discret pendant le chargement initial -->
+            <div class="stage-loader" id="model-loader">
+              <div class="spinner-border text-info" style="width: 2.75rem; height: 2.75rem;" role="status">
+                <span class="visually-hidden">Chargement...</span>
+              </div>
+              <div id="file-protocol-fallback" class="d-none text-center mt-3">
+                <label class="btn btn-sm btn-info fw-semibold rounded-pill px-3">
+                  <i class="bi bi-folder2-open me-1"></i> Charger Tikaf.fbx
+                  <input type="file" id="manual-fbx-input" accept=".fbx" class="d-none">
+                </label>
+              </div>
+            </div>
+
+            <div id="tikaf-canvas-container"></div>
+          </div>
+        </div>
+
+        <!-- Colonne Tableau Paginé des Étudiants Réunionnais -->
+        <div class="col-12 col-lg-7">
+          <div class="glass-card p-4 p-md-5" id="table-card">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3 mb-4">
+              <h1 class="h2 hero-title mb-0">Étudiants Réunionnais</h1>
+            </div>
+
+            <!-- Tableau Responsive Bootstrap 5.3.8 -->
+            <div class="table-responsive">
+              <table class="table table-cyber table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th scope="col" style="width: 12%;">#</th>
+                    <th scope="col" style="width: 34%;">Nom</th>
+                    <th scope="col" style="width: 34%;">Prénom</th>
+                    <th scope="col" style="width: 20%;">Âge</th>
+                  </tr>
+                </thead>
+                <tbody id="student-table-body">
+                  <!-- Contenu généré dynamiquement -->
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Pagination Bootstrap 5.3.8 -->
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-center gap-3 pt-4 mt-3 border-top border-secondary border-opacity-25">
+              <div class="text-secondary small" id="pagination-info"></div>
+              <nav aria-label="Pagination des étudiants">
+                <ul class="pagination pagination-cyber mb-0" id="pagination-controls"></ul>
+              </nav>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Bootstrap 5.3.8 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+
+    <!-- Script Tableau Paginé & Effets Parallax -->
+    <script>
+      const etudiants = [
+        { nom: "Payet", prenom: "Lucas", age: 20 },
+        { nom: "Hoarau", prenom: "Maëva", age: 21 },
+        { nom: "Grondin", prenom: "Tiago", age: 19 },
+        { nom: "Boyer", prenom: "Anaïs", age: 22 },
+        { nom: "Rivière", prenom: "Mathis", age: 20 },
+        { nom: "Fontaine", prenom: "Chloé", age: 23 },
+        { nom: "Técher", prenom: "Raphaël", age: 18 },
+        { nom: "Lebreton", prenom: "Léa", age: 21 },
+        { nom: "Maillot", prenom: "Enzo", age: 24 },
+        { nom: "Dijoux", prenom: "Camille", age: 19 },
+        { nom: "Turpin", prenom: "Noah", age: 20 },
+        { nom: "Nativel", prenom: "Océane", age: 22 },
+        { nom: "Morel", prenom: "Yanis", age: 21 },
+        { nom: "Damour", prenom: "Inès", age: 18 },
+        { nom: "Bègue", prenom: "Kylian", age: 23 },
+        { nom: "Ramassamy", prenom: "Surya", age: 20 },
+        { nom: "Pausé", prenom: "Manon", age: 19 },
+        { nom: "Ah-Sing", prenom: "Julien", age: 22 },
+        { nom: "Mussard", prenom: "Lola", age: 21 },
+        { nom: "Virapoullé", prenom: "Dilan", age: 24 },
+        { nom: "Cadet", prenom: "Élodie", age: 20 },
+        { nom: "Sinimalé", prenom: "Rohan", age: 19 },
+        { nom: "Robert", prenom: "Sarah", age: 21 },
+        { nom: "Law-Yen", prenom: "Mélodie", age: 22 }
+      ];
+
+      const avatarGradients = [
+        "linear-gradient(135deg, #ff5e3a, #ff2a6d)",
+        "linear-gradient(135deg, #00f2fe, #4facfe)",
+        "linear-gradient(135deg, #10b981, #059669)",
+        "linear-gradient(135deg, #f59e0b, #ef4444)",
+        "linear-gradient(135deg, #8b5cf6, #ec4899)"
+      ];
+
+      const itemsPerPage = 6;
+      let currentPage = 1;
+
+      const tableBody = document.getElementById("student-table-body");
+      const paginationControls = document.getElementById("pagination-controls");
+      const paginationInfo = document.getElementById("pagination-info");
+      const tableCard = document.getElementById("table-card");
+      const comicBubble = document.getElementById("tikaf-comic-bubble");
+      const comicText = document.getElementById("tikaf-comic-text");
+
+      function showComicBubble(etudiant) {
+        if (!comicBubble || !comicText) return;
+        comicText.textContent = `${etudiant.prenom} ${etudiant.nom} !`;
+        comicBubble.classList.add("visible");
+      }
+
+      function hideComicBubble() {
+        if (!comicBubble) return;
+        comicBubble.classList.remove("visible");
+      }
+
+      function renderTable(page) {
+        tableBody.innerHTML = "";
+        hideComicBubble();
+        const startIndex = (page - 1) * itemsPerPage;
+        const endIndex = Math.min(startIndex + itemsPerPage, etudiants.length);
+        const pageItems = etudiants.slice(startIndex, endIndex);
+
+        pageItems.forEach((etudiant, index) => {
+          const globalIndex = startIndex + index + 1;
+          const row = document.createElement("tr");
+          row.className = "student-row-anim";
+          row.style.animationDelay = `${index * 45}ms`;
+
+          const initials = `${etudiant.prenom[0]}${etudiant.nom[0]}`.toUpperCase();
+          const gradient = avatarGradients[(globalIndex - 1) % avatarGradients.length];
+
+          row.innerHTML = `
+            <th scope="row" class="text-secondary fw-normal ps-3">#${String(globalIndex).padStart(2, "0")}</th>
+            <td>
+              <div class="d-flex align-items-center gap-3">
+                <div class="student-avatar" style="background: ${gradient};">${initials}</div>
+                <span class="fw-bold text-white">${etudiant.nom}</span>
+              </div>
+            </td>
+            <td class="fw-medium text-light">${etudiant.prenom}</td>
+            <td>
+              <span class="badge rounded-pill bg-info bg-opacity-10 text-info border border-info border-opacity-25 px-3 py-2">
+                ${etudiant.age} ans
+              </span>
+            </td>
+          `;
+
+          row.addEventListener("mouseenter", () => showComicBubble(etudiant));
+          row.addEventListener("mouseleave", hideComicBubble);
+
+          tableBody.appendChild(row);
+        });
+
+        paginationInfo.textContent = `Affichage de ${startIndex + 1} à ${endIndex} sur ${etudiants.length}`;
+      }
+
+      function renderPagination() {
+        paginationControls.innerHTML = "";
+        const totalPages = Math.ceil(etudiants.length / itemsPerPage);
+
+        const prevLi = document.createElement("li");
+        prevLi.className = `page-item ${currentPage === 1 ? "disabled" : ""}`;
+        prevLi.innerHTML = `<button class="page-link" type="button" aria-label="Précédent"><i class="bi bi-chevron-left"></i></button>`;
+        prevLi.addEventListener("click", () => {
+          if (currentPage > 1) {
+            currentPage--;
+            updateView();
+          }
+        });
+        paginationControls.appendChild(prevLi);
+
+        for (let i = 1; i <= totalPages; i++) {
+          const pageLi = document.createElement("li");
+          pageLi.className = `page-item ${i === currentPage ? "active" : ""}`;
+          pageLi.innerHTML = `<button class="page-link fw-semibold" type="button">${i}</button>`;
+          pageLi.addEventListener("click", () => {
+            currentPage = i;
+            updateView();
+          });
+          paginationControls.appendChild(pageLi);
+        }
+
+        const nextLi = document.createElement("li");
+        nextLi.className = `page-item ${currentPage === totalPages ? "disabled" : ""}`;
+        nextLi.innerHTML = `<button class="page-link" type="button" aria-label="Suivant"><i class="bi bi-chevron-right"></i></button>`;
+        nextLi.addEventListener("click", () => {
+          if (currentPage < totalPages) {
+            currentPage++;
+            updateView();
+          }
+        });
+        paginationControls.appendChild(nextLi);
+      }
+
+      function updateView() {
+        renderTable(currentPage);
+        renderPagination();
+      }
+
+      // Effet Parallax Global & Reflet sur la Carte
+      const parallaxLayers = document.querySelectorAll("[data-parallax-speed]");
+      const parallaxGrid = document.getElementById("parallax-grid");
+
+      window.addEventListener("mousemove", e => {
+        const x = (e.clientX / window.innerWidth - 0.5) * 2;
+        const y = (e.clientY / window.innerHeight - 0.5) * 2;
+
+        parallaxLayers.forEach(layer => {
+          const speed = parseFloat(layer.getAttribute("data-parallax-speed")) || 0.02;
+          layer.style.transform = `translate3d(${x * speed * 900}px, ${y * speed * 900}px, 0)`;
+        });
+
+        if (parallaxGrid) {
+          parallaxGrid.style.transform = `perspective(650px) rotateX(${28 - y * 3.5}deg) translate3d(${x * -22}px, ${y * -22}px, 0)`;
+        }
+
+        if (tableCard) {
+          const rect = tableCard.getBoundingClientRect();
+          tableCard.style.setProperty("--mouse-x", `${e.clientX - rect.left}px`);
+          tableCard.style.setProperty("--mouse-y", `${e.clientY - rect.top}px`);
+          tableCard.style.transform = `perspective(1200px) rotateY(${x * 2.2}deg) rotateX(${-y * 2.2}deg)`;
+        }
+      });
+
+      // Particules Lumineuses en Arrière-plan
+      const pCanvas = document.getElementById("particles-canvas");
+      const pCtx = pCanvas.getContext("2d");
+      const particles = [];
+
+      function resizeParticles() {
+        pCanvas.width = window.innerWidth;
+        pCanvas.height = window.innerHeight;
+      }
+      window.addEventListener("resize", resizeParticles);
+      resizeParticles();
+
+      for (let i = 0; i < 50; i++) {
+        particles.push({
+          x: Math.random() * pCanvas.width,
+          y: Math.random() * pCanvas.height,
+          r: Math.random() * 2.3 + 0.6,
+          vx: (Math.random() - 0.5) * 0.4,
+          vy: -Math.random() * 0.65 - 0.15,
+          color: Math.random() > 0.5 ? "rgba(0, 242, 254, 0.55)" : "rgba(255, 94, 58, 0.55)"
+        });
+      }
+
+      function animateParticles() {
+        pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.y < -10) p.y = pCanvas.height + 10;
+          if (p.x < -10) p.x = pCanvas.width + 10;
+          if (p.x > pCanvas.width + 10) p.x = -10;
+
+          pCtx.beginPath();
+          pCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          pCtx.fillStyle = p.color;
+          pCtx.fill();
+        }
+        requestAnimationFrame(animateParticles);
+      }
+      animateParticles();
+
+      updateView();
+    </script>
+
+    <!-- Module Three.js pour Tikaf.fbx correctement orienté et intégré -->
+    <script type="module">
+      import * as THREE from "three";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+
+      const container = document.getElementById("tikaf-canvas-container");
+      const loaderOverlay = document.getElementById("model-loader");
+      const fileFallback = document.getElementById("file-protocol-fallback");
+      const manualFbxInput = document.getElementById("manual-fbx-input");
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(38, container.clientWidth / container.clientHeight, 0.1, 100);
+      camera.position.set(0, 0.15, 4.7);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.3;
+      container.appendChild(renderer.domElement);
+
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.enableZoom = false;
+      controls.enablePan = false;
+      controls.minPolarAngle = Math.PI / 2 - 0.35;
+      controls.maxPolarAngle = Math.PI / 2 + 0.2;
+      controls.target.set(0, 0, 0);
+
+      // Éclairage Studio
+      const ambientLight = new THREE.AmbientLight(0xffffff, 1.55);
+      scene.add(ambientLight);
+
+      const keyLight = new THREE.DirectionalLight(0xfff5e6, 2.8);
+      keyLight.position.set(3, 5, 4);
+      keyLight.castShadow = true;
+      scene.add(keyLight);
+
+      const rimLightLeft = new THREE.PointLight(0xff5e3a, 5.5, 10);
+      rimLightLeft.position.set(-3, 1.5, -2);
+      scene.add(rimLightLeft);
+
+      const rimLightRight = new THREE.PointLight(0x00f2fe, 5.5, 10);
+      rimLightRight.position.set(3, 2, -2);
+      scene.add(rimLightRight);
+
+      // Halo lumineux discret sous les pieds
+      const haloGroup = new THREE.Group();
+      haloGroup.position.y = -1.42;
+      scene.add(haloGroup);
+
+      const ringGeo = new THREE.TorusGeometry(0.95, 0.018, 16, 100);
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f2fe, transparent: true, opacity: 0.75 });
+      const holoRing = new THREE.Mesh(ringGeo, ringMat);
+      holoRing.rotation.x = Math.PI / 2;
+      haloGroup.add(holoRing);
+
+      const outerRingGeo = new THREE.TorusGeometry(1.18, 0.01, 16, 100);
+      const outerRingMat = new THREE.MeshBasicMaterial({ color: 0xff5e3a, transparent: true, opacity: 0.5 });
+      const outerRing = new THREE.Mesh(outerRingGeo, outerRingMat);
+      outerRing.rotation.x = Math.PI / 2;
+      haloGroup.add(outerRing);
+
+      // Gestionnaire de texture vers Tikaf/Tikaf.png
+      const manager = new THREE.LoadingManager();
+      manager.setURLModifier(url => {
+        if (url.startsWith("blob:") || url.startsWith("data:")) return url;
+        if (url.toLowerCase().endsWith(".png")) {
+          return "./Tikaf/Tikaf.png";
+        }
+        return url;
+      });
+
+      const textureLoader = new THREE.TextureLoader(manager);
+      let fallbackTexture = null;
+      textureLoader.load("./Tikaf/Tikaf.png", tex => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        fallbackTexture = tex;
+      });
+
+      // Groupe pivot vertical pour orienter Tikaf debout face caméra
+      const tikafPivot = new THREE.Group();
+      scene.add(tikafPivot);
+
+      let tikafModel = null;
+      let mixer = null;
+      let targetMouseX = 0;
+      let targetMouseY = 0;
+      let lastMouseX = null;
+      let lastMouseY = null;
+      let mouseClientX = window.innerWidth * 0.5;
+      let mouseClientY = window.innerHeight * 0.5;
+      let mouseAnimDelta = 0;
+
+      // Bones de la chaîne cervicale / tête pour le suivi du regard
+      let lookBones = [];
+      let headRefBone = null;
+      let currentHeadYaw = 0;
+      let currentHeadPitch = 0;
+      const tempHeadWorldPos = new THREE.Vector3();
+      const tempEuler = new THREE.Euler(0, 0, 0, "YXZ");
+      const tempLookQuat = new THREE.Quaternion();
+
+      window.addEventListener("mousemove", e => {
+        mouseClientX = e.clientX;
+        mouseClientY = e.clientY;
+        targetMouseX = (e.clientX / window.innerWidth - 0.5) * 0.7;
+        targetMouseY = (e.clientY / window.innerHeight - 0.5) * 0.25;
+
+        if (lastMouseX !== null && lastMouseY !== null) {
+          const dx = e.clientX - lastMouseX;
+          const dy = e.clientY - lastMouseY;
+          const distance = Math.hypot(dx, dy);
+          // Chaque déplacement de la souris alimente directement les frames de l'animation de marche
+          mouseAnimDelta = Math.min(mouseAnimDelta + distance * 0.0025, 0.12);
+        }
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+      });
+
+      function saveLookBonesBaseQuat() {
+        for (const item of lookBones) {
+          item.baseQuat.copy(item.bone.quaternion);
+        }
+      }
+
+      function restoreLookBonesBaseQuat() {
+        for (const item of lookBones) {
+          item.bone.quaternion.copy(item.baseQuat);
+        }
+      }
+
+      function setupLoadedModel(object) {
+        if (tikafModel) {
+          tikafPivot.remove(tikafModel);
+        }
+        tikafModel = object;
+        lookBones = [];
+        headRefBone = null;
+
+        const boneWeights = {
+          Spine02: 0.15,
+          NeckTwist01: 0.25,
+          NeckTwist02: 0.25,
+          Head: 0.55
+        };
+
+        // Appliquer textures, ombres & récupérer les bones du cou et de la tête
+        tikafModel.traverse(child => {
+          if (child.isBone && boneWeights[child.name] !== undefined) {
+            lookBones.push({
+              bone: child,
+              weight: boneWeights[child.name],
+              baseQuat: child.quaternion.clone()
+            });
+            if (child.name === "Head") {
+              headRefBone = child;
+            }
+          }
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            materials.forEach(mat => {
+              if (!mat) return;
+              if (mat.map) {
+                mat.map.colorSpace = THREE.SRGBColorSpace;
+              } else if (fallbackTexture) {
+                mat.map = fallbackTexture;
+              }
+              mat.needsUpdate = true;
+            });
+          }
+        });
+
+        // Redresser Tikaf debout : compenser la rotation X (+90°) des noeuds FBX
+        tikafModel.rotation.set(-Math.PI / 2, 0, 0);
+        tikafModel.updateMatrixWorld(true);
+
+        // Démarrer l'animation et mettre à jour la pose avant de calculer la boîte englobante
+        if (tikafModel.animations && tikafModel.animations.length > 0) {
+          mixer = new THREE.AnimationMixer(tikafModel);
+          const action = mixer.clipAction(tikafModel.animations[0]);
+          action.play();
+          mixer.update(0);
+          tikafModel.updateMatrixWorld(true);
+        }
+
+        saveLookBonesBaseQuat();
+
+        // Calculer la taille réelle une fois redressé debout
+        const box = new THREE.Box3().setFromObject(tikafModel);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+
+        const maxDim = Math.max(size.x, size.y, size.z) || 1;
+        const desiredHeight = 2.75;
+        const scale = desiredHeight / maxDim;
+        tikafModel.scale.setScalar(scale);
+        tikafModel.updateMatrixWorld(true);
+
+        // Centrer parfaitement Tikaf sur le socle
+        const scaledBox = new THREE.Box3().setFromObject(tikafModel);
+        const scaledCenter = new THREE.Vector3();
+        scaledBox.getCenter(scaledCenter);
+
+        tikafModel.position.x = -scaledCenter.x;
+        tikafModel.position.z = -scaledCenter.z;
+        tikafModel.position.y = -1.38 - scaledBox.min.y;
+
+        tikafPivot.add(tikafModel);
+        loaderOverlay.classList.add("hidden");
+      }
+
+      const fbxLoader = new FBXLoader(manager);
+      fbxLoader.load(
+        "./Tikaf.fbx",
+        object => setupLoadedModel(object),
+        undefined,
+        () => {
+          fileFallback.classList.remove("d-none");
+        }
+      );
+
+      manualFbxInput.addEventListener("change", e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const obj = fbxLoader.parse(ev.target.result, "./Tikaf/");
+          setupLoadedModel(obj);
+        };
+        reader.readAsArrayBuffer(file);
+      });
+
+      window.addEventListener("resize", () => {
+        if (!container) return;
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+      });
+
+      const clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const elapsed = clock.getElapsedTime();
+
+        // Avancer les frames de l'animation uniquement lors des déplacements de la souris
+        if (mixer && mouseAnimDelta > 0.0001) {
+          restoreLookBonesBaseQuat();
+          const step = mouseAnimDelta * 0.35;
+          mixer.update(step);
+          saveLookBonesBaseQuat();
+          mouseAnimDelta -= step;
+          if (mouseAnimDelta < 0.0001) {
+            mouseAnimDelta = 0;
+          }
+        }
+
+        // Suivi du regard : orienter les bones du cou et de la tête vers la position 2D de la souris
+        if (lookBones.length > 0) {
+          let refScreenX = window.innerWidth * 0.3;
+          let refScreenY = window.innerHeight * 0.4;
+
+          if (headRefBone) {
+            headRefBone.getWorldPosition(tempHeadWorldPos);
+            tempHeadWorldPos.project(camera);
+            const rect = container.getBoundingClientRect();
+            refScreenX = rect.left + (tempHeadWorldPos.x * 0.5 + 0.5) * rect.width;
+            refScreenY = rect.top + (-tempHeadWorldPos.y * 0.5 + 0.5) * rect.height;
+          }
+
+          const relX = (mouseClientX - refScreenX) / (window.innerWidth * 0.45);
+          const relY = (mouseClientY - refScreenY) / (window.innerHeight * 0.45);
+
+          const desiredYaw = Math.tanh(relX) * 0.85;
+          const desiredPitch = -Math.tanh(relY) * 0.55;
+
+          currentHeadYaw += (desiredYaw - currentHeadYaw) * 0.12;
+          currentHeadPitch += (desiredPitch - currentHeadPitch) * 0.12;
+
+          for (const item of lookBones) {
+            const w = item.weight;
+            tempEuler.set(
+              currentHeadPitch * w,
+              currentHeadYaw * w,
+              -currentHeadYaw * w * 0.12
+            );
+            tempLookQuat.setFromEuler(tempEuler);
+            item.bone.quaternion.copy(item.baseQuat).multiply(tempLookQuat);
+          }
+        }
+
+        // Parallax léger du corps accompagnant le regard
+        const desiredRotY = targetMouseX * 0.25;
+        const desiredRotX = -targetMouseY * 0.2;
+        tikafPivot.rotation.y += (desiredRotY - tikafPivot.rotation.y) * 0.08;
+        tikafPivot.rotation.x += (desiredRotX - tikafPivot.rotation.x) * 0.08;
+
+        holoRing.scale.setScalar(1 + Math.sin(elapsed * 2.5) * 0.04);
+        outerRing.rotation.z = elapsed * 0.4;
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      animate();
+    </script>
+  </body>
+</html>

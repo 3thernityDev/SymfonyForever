@@ -8,6 +8,7 @@ use App\Entity\Character;
 use App\Entity\User;
 use App\Repository\CharacterRepository;
 use App\Service\Game\CombatService;
+use App\Service\Game\QuestService;
 use App\Service\Game\StatePayloadBuilder;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -21,6 +22,7 @@ final class CombatController extends AbstractController
         Request $request,
         CharacterRepository $characterRepository,
         CombatService $combatService,
+        QuestService $questService,
         StatePayloadBuilder $payloadBuilder,
     ): JsonResponse {
         /** @var User $user */
@@ -45,6 +47,7 @@ final class CombatController extends AbstractController
         return $this->json([
             ...$result,
             'self' => $payloadBuilder->buildSelf($character, $now),
+            'quests' => $questService->buildQuestState($character),
         ], $result['ok'] ? 200 : 422);
     }
 }

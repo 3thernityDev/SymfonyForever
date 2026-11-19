@@ -11,6 +11,7 @@ use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
+use App\Service\Game\QuestService;
 use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatePayloadBuilder;
 use App\Service\Game\WorldSimulationService;
@@ -35,6 +36,7 @@ final class WorldSyncController extends AbstractController
         ChatMessageRepository $chatRepository,
         ReunionTerrainService $terrainService,
         WorldSimulationService $simulationService,
+        QuestService $questService,
         StatePayloadBuilder $payloadBuilder,
     ): JsonResponse {
         /** @var User $user */
@@ -90,6 +92,7 @@ final class WorldSyncController extends AbstractController
         }
 
         $character->setLastSeenAt($now);
+        $questService->onZoneEntered($character, $character->getZoneCode());
         $em->flush();
 
         // Trigger lazy 1 Hz zone simulation tick under Symfony Lock
@@ -142,6 +145,7 @@ final class WorldSyncController extends AbstractController
             'events' => array_map(static fn ($e): array => $e->toArray(), $events),
             'chat' => array_map(static fn ($m): array => $m->toArray(), $chatMessages),
             'party' => $payloadBuilder->buildParty($character->getParty(), $now),
+            'quests' => $questService->buildQuestState($character),
             'pendingInvite' => $character->getPendingPartyInviteId() !== null ? [
                 'partyId' => $character->getPendingPartyInviteId(),
                 'label' => $pendingInvitePartyName,

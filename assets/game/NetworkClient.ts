@@ -1,4 +1,4 @@
-import type { ManifestResponse, SelfState, SyncResponse } from './types';
+import type { ManifestResponse, QuestStatePayload, SelfState, SyncResponse } from './types';
 
 export class NetworkClient {
   public lastPingMs = 0;
@@ -50,7 +50,15 @@ export class NetworkClient {
     skillCode: string,
     targetType: string | null,
     targetId: number | null,
-  ): Promise<{ ok: boolean; error?: string; self?: SelfState; events?: SyncResponse['events']; xpGained?: number; leveledUp?: boolean }> {
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    self?: SelfState;
+    quests?: QuestStatePayload;
+    events?: SyncResponse['events'];
+    xpGained?: number;
+    leveledUp?: boolean;
+  }> {
     const res = await fetch('/api/combat/cast', {
       method: 'POST',
       credentials: 'same-origin',
@@ -61,6 +69,7 @@ export class NetworkClient {
       ok: boolean;
       error?: string;
       self?: SelfState;
+      quests?: QuestStatePayload;
       events?: SyncResponse['events'];
       xpGained?: number;
       leveledUp?: boolean;
@@ -87,14 +96,63 @@ export class NetworkClient {
     return (await res.json()) as { ok: boolean; self?: SelfState };
   }
 
-  public async travel(characterId: number, zoneCode: string): Promise<{ ok: boolean; error?: string; self?: SelfState }> {
+  public async travel(
+    characterId: number,
+    zoneCode: string,
+  ): Promise<{ ok: boolean; error?: string; self?: SelfState; quests?: QuestStatePayload }> {
     const res = await fetch('/api/character/travel', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ characterId, zoneCode }),
     });
-    return (await res.json()) as { ok: boolean; error?: string; self?: SelfState };
+    return (await res.json()) as { ok: boolean; error?: string; self?: SelfState; quests?: QuestStatePayload };
+  }
+
+  public async acceptQuest(
+    characterId: number,
+    questCode: string,
+  ): Promise<{ ok: boolean; error?: string; self?: SelfState; quests?: QuestStatePayload }> {
+    const res = await fetch('/api/quests/accept', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId, questCode }),
+    });
+    return (await res.json()) as { ok: boolean; error?: string; self?: SelfState; quests?: QuestStatePayload };
+  }
+
+  public async completeQuest(
+    characterId: number,
+    questCode: string,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    rewardXp?: number;
+    rewardStatPoints?: number;
+    leveledUp?: boolean;
+    newLevel?: number;
+    completionText?: string;
+    self?: SelfState;
+    quests?: QuestStatePayload;
+  }> {
+    const res = await fetch('/api/quests/complete', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId, questCode }),
+    });
+    return (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      rewardXp?: number;
+      rewardStatPoints?: number;
+      leveledUp?: boolean;
+      newLevel?: number;
+      completionText?: string;
+      self?: SelfState;
+      quests?: QuestStatePayload;
+    };
   }
 
   public async sendChat(characterId: number, channel: string, content: string): Promise<{ ok: boolean; error?: string }> {

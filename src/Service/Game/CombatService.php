@@ -20,6 +20,7 @@ final class CombatService
         private readonly SkillRegistry $skillRegistry,
         private readonly StatCalculator $statCalculator,
         private readonly LevelingService $levelingService,
+        private readonly QuestService $questService,
         private readonly CharacterRepository $characterRepository,
         private readonly MonsterInstanceRepository $monsterRepository,
     ) {
@@ -246,6 +247,9 @@ final class CombatService
         $killerLeveledUp = false;
 
         foreach ($recipients as $member) {
+            // Advance active KILL_MONSTER quests for every eligible party member
+            $this->questService->onMonsterKilled($member, $template);
+
             $result = $this->levelingService->grantXp($member, $xpPerMember);
             if ($member->getId() === $killer->getId()) {
                 $killerXp = $xpPerMember;

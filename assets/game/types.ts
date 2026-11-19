@@ -51,6 +51,73 @@ export interface LandmarkMeta {
   type: string;
 }
 
+export interface NpcData {
+  code: string;
+  name: string;
+  title: string;
+  greeting: string;
+  zoneCode: string;
+  x: number;
+  y: number;
+  z: number;
+  rotY: number;
+  coatColor: string;
+  accentColor: string;
+}
+
+export interface QuestDefinitionData {
+  code: string;
+  order: number;
+  title: string;
+  description: string;
+  completionText: string;
+  giverNpcCode: string;
+  turnInNpcCode: string;
+  minLevel: number;
+  recommendedLevel: number;
+  prerequisiteQuestCode: string | null;
+  objectiveType: 'KILL_MONSTER' | 'REACH_ZONE';
+  targetCode: string;
+  targetLabel: string;
+  targetCount: number;
+  guideX: number;
+  guideZ: number;
+  rewardXp: number;
+  rewardStatPoints: number;
+}
+
+export interface ActiveQuestState {
+  code: string;
+  title: string;
+  status: 'ACTIVE' | 'READY';
+  progress: number;
+  targetCount: number;
+  targetLabel: string;
+  turnInNpcCode: string;
+  rewardXp: number;
+  rewardStatPoints: number;
+}
+
+export interface QuestGuidance {
+  mode: 'TURN_IN' | 'OBJECTIVE' | 'TALK_GIVER' | 'LEVEL_UP';
+  title: string;
+  text: string;
+  x: number;
+  z: number;
+  zoneCode: string;
+}
+
+export type NpcMarkerState = 'AVAILABLE' | 'TURN_IN' | 'IN_PROGRESS' | 'NONE';
+
+export interface QuestStatePayload {
+  active: ActiveQuestState[];
+  availableCodes: string[];
+  completedCodes: string[];
+  npcMarkers: Record<string, NpcMarkerState>;
+  guidance: QuestGuidance | null;
+  totalQuests: number;
+}
+
 export interface ManifestResponse {
   gameTitle: string;
   world: {
@@ -66,6 +133,8 @@ export interface ManifestResponse {
   };
   zones: Record<string, ZoneMeta>;
   landmarks: LandmarkMeta[];
+  npcs: NpcData[];
+  quests: Record<string, QuestDefinitionData>;
   classes: Record<ClassCode, ClassMeta>;
   skills: Record<string, SkillData>;
   gcd: number;
@@ -219,5 +288,6 @@ export interface SyncResponse {
   events: CombatEventData[];
   chat: ChatMessageData[];
   party: PartyState | null;
+  quests: QuestStatePayload;
   pendingInvite: { partyId: number; label: string } | null;
 }

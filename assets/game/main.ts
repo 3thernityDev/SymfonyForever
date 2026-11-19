@@ -2,9 +2,11 @@ import * as THREE from 'three';
 import {
   animateAvatar,
   createMonsterMesh,
+  createNpcMesh,
   createPlayerAvatar,
   type AnimatedAvatar,
   type MonsterVisual,
+  type NpcVisual,
 } from './EntityMeshFactory';
 import { Minimap } from './Minimap';
 import { NetworkClient } from './NetworkClient';
@@ -17,8 +19,10 @@ import type {
   CombatEventData,
   ManifestResponse,
   MonsterState,
+  NpcData,
   PartyState,
   PublicPlayer,
+  QuestStatePayload,
   SelfState,
   SkillData,
   SyncResponse,
@@ -36,6 +40,12 @@ interface MonsterEntry {
   state: MonsterState;
   visual: MonsterVisual;
   targetPos: THREE.Vector3;
+  nameplate: HTMLDivElement;
+}
+
+interface NpcEntry {
+  data: NpcData;
+  visual: NpcVisual;
   nameplate: HTMLDivElement;
 }
 
@@ -59,11 +69,14 @@ class SymfonyForeverGame {
   private selfAvatar!: AnimatedAvatar;
   private selfState: SelfState | null = null;
   private partyState: PartyState | null = null;
+  private questState: QuestStatePayload | null = null;
   private classSkills: SkillData[] = [];
 
   private readonly remotePlayers = new Map<number, RemotePlayerEntry>();
   private readonly monsters = new Map<number, MonsterEntry>();
+  private readonly npcs = new Map<string, NpcEntry>();
   private readonly seenEventIds = new Set<number>();
+  private readonly notifiedReadyQuests = new Set<string>();
 
   private lastEventId = 0;
   private lastChatId = 0;
@@ -74,6 +87,8 @@ class SymfonyForeverGame {
   private activeChatTab: 'ZONE' | 'GLOBAL' | 'PARTY' | 'COMBAT' = 'ZONE';
   private readonly chatHistory: { channel: string; html: string }[] = [];
   private charModalOpen = false;
+  private activeNpcModalCode: string | null = null;
+  private nearestNpcCode: string | null = null;
   private toastTimeout: number | null = null;
   private bannerTimeout: number | null = null;
 
@@ -117,6 +132,7 @@ class SymfonyForeverGame {
 
       this.selfAvatar = createPlayerAvatar(this.classCode);
       this.scene.add(this.selfAvatar.group);
+      this.spawnNpcs();
 
       const minimapCanvas = document.getElementById('minimap-canvas') as HTMLCanvasElement;
       this.minimap = new Minimap(
@@ -224,6 +240,9 @@ class SymfonyForeverGame {
         this.updateNameplate(entry.nameplate, entry.visual.group.position, heightOffset, entry.state.hp, entry.state.maxHp, true);
       }
 
+      // Animate NPCs, markers & proximity interaction prompt
+      this.updateNpcsFrame(elapsed);
+
       // Update environment, VFX, minimap & local cooldown countdowns
       this.worldRenderer.update(dt, elapsed);
       this.vfx.update(dt);
@@ -238,7 +257,12 @@ class SymfonyForeverGame {
         this.selfState?.partyId ?? null,
         playersArr,
         monstersArr,
+        this.manifest.npcs,
+        this.questState,
+        elapsed,
       );
+
+      this.updateQuestDistanceLabel();
 
       const coordsEl = document.getElementById('hud-coords');
       if (coordsEl) {
@@ -389,6 +413,9 @@ class SymfonyForeverGame {
     this.updateSelfHud();
     this.updateTargetHud();
     this.updatePartyHud(resp.pendingInvite);
+    if (resp.quests) {
+      this.applyQuestState(resp.quests, isFirst);
+    }
   }
 
   private handleCombatEvent(ev: CombatEventData): void {
@@ -485,6 +512,9 @@ class SymfonyForeverGame {
         this.controller.teleport(res.self.x, res.self.y, res.self.z);
         this.showToast(`Arrivée : ${this.manifest.zones[code]?.name ?? code}`);
       }
+      if (res.quests) {
+        this.applyQuestState(res.quests, false);
+      }
     });
 
     // Global MMO hotkeys
@@ -493,7 +523,7 @@ class SymfonyForeverGame {
 
     const handleFocusPause = () => {
       const typing = document.activeElement === chatInput || document.activeElement === partyInput;
-      this.controller.setInputBlocked(typing || this.charModalOpen);
+      this.controller.setInputBlocked(typing || this.charModalOpen || this.activeNpcModalCode !== null);
     };
     chatInput.addEventListener('focus', handleFocusPause);
     chatInput.addEventListener('blur', handleFocusPause);
@@ -510,6 +540,8 @@ class SymfonyForeverGame {
       if (e.key === 'Escape') {
         if (typing) {
           (document.activeElement as HTMLElement).blur();
+        } else if (this.activeNpcModalCode !== null) {
+          this.closeNpcModal();
         } else if (this.charModalOpen) {
           this.toggleCharModal(false);
         } else {
@@ -518,6 +550,16 @@ class SymfonyForeverGame {
         return;
       }
       if (typing) return;
+
+      if (e.code === 'KeyE' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen) {
+        if (this.nearestNpcCode) {
+          e.preventDefault();
+          this.openNpcModal(this.nearestNpcCode);
+          return;
+        }
+      }
+
+      if (this.activeNpcModalCode !== null) return;
 
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -547,9 +589,13 @@ class SymfonyForeverGame {
       });
     }
 
-    // Character Sheet Modal
+    // Character Sheet Modal & NPC Dialogue Modal
     document.getElementById('btn-char-sheet')?.addEventListener('click', () => this.toggleCharModal(!this.charModalOpen));
     document.getElementById('btn-close-char-modal')?.addEventListener('click', () => this.toggleCharModal(false));
+    document.getElementById('btn-close-npc-modal')?.addEventListener('click', () => this.closeNpcModal());
+    document.getElementById('npc-interact-prompt')?.addEventListener('click', () => {
+      if (this.nearestNpcCode) this.openNpcModal(this.nearestNpcCode);
+    });
 
     // Respawn button
     document.getElementById('btn-respawn')?.addEventListener('click', async () => {
@@ -640,6 +686,9 @@ class SymfonyForeverGame {
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
 
     const pickables: THREE.Object3D[] = [];
+    for (const n of this.npcs.values()) {
+      pickables.push(n.visual.group);
+    }
     for (const m of this.monsters.values()) {
       if (m.state.state !== 'DEAD') pickables.push(m.visual.group);
     }
@@ -649,8 +698,16 @@ class SymfonyForeverGame {
 
     const hits = this.raycaster.intersectObjects(pickables, true);
     if (hits.length > 0) {
-      const ud = hits[0].object.userData as { entityType?: 'MONSTER' | 'PLAYER'; entityId?: number };
-      if (ud.entityType && ud.entityId) {
+      const ud = hits[0].object.userData as {
+        entityType?: 'MONSTER' | 'PLAYER' | 'NPC';
+        entityId?: number;
+        npcCode?: string;
+      };
+      if (ud.entityType === 'NPC' && ud.npcCode) {
+        this.openNpcModal(ud.npcCode);
+        return;
+      }
+      if ((ud.entityType === 'MONSTER' || ud.entityType === 'PLAYER') && ud.entityId) {
         this.setTarget(ud.entityType, ud.entityId);
         return;
       }
@@ -713,6 +770,9 @@ class SymfonyForeverGame {
     if (res.self) {
       this.selfState = res.self;
       this.updateSelfHud();
+    }
+    if (res.quests) {
+      this.applyQuestState(res.quests, false);
     }
     if (res.events) {
       for (const ev of res.events) {
@@ -1050,6 +1110,334 @@ class SymfonyForeverGame {
     el.style.top = `${sy}px`;
     const bar = el.querySelector('.np-hp > i') as HTMLElement | null;
     if (bar) bar.style.width = `${Math.max(0, Math.min(100, (hp / Math.max(1, maxHp)) * 100))}%`;
+  }
+
+  private spawnNpcs(): void {
+    for (const npc of this.manifest.npcs) {
+      const visual = createNpcMesh(npc.coatColor, npc.accentColor);
+      visual.group.position.set(npc.x, npc.y, npc.z);
+      visual.group.rotation.y = npc.rotY;
+      visual.group.traverse((obj) => {
+        obj.userData = { entityType: 'NPC', npcCode: npc.code };
+      });
+      this.scene.add(visual.group);
+
+      const el = document.createElement('div');
+      el.className = 'nameplate';
+      el.innerHTML = `
+        <div class="np-quest-badge" style="font-size:18px; font-weight:900; line-height:1; text-shadow:0 2px 5px #000;"></div>
+        <div class="np-label" style="color:#fde047;">${this.esc(npc.name)}</div>
+        <div style="font-size:10px; color:#5eead4; text-shadow:0 1px 3px #000;">&lt;${this.esc(npc.title)}&gt;</div>
+      `;
+      this.floatingLayer.appendChild(el);
+
+      this.npcs.set(npc.code, { data: npc, visual, nameplate: el });
+    }
+  }
+
+  private updateNpcsFrame(elapsed: number): void {
+    let closestCode: string | null = null;
+    let closestDist = 17.0;
+
+    for (const [code, entry] of this.npcs) {
+      const marker = this.questState?.npcMarkers[code] ?? 'NONE';
+      const showCrystal = marker === 'AVAILABLE' || marker === 'TURN_IN';
+      entry.visual.markerMesh.visible = showCrystal;
+      if (showCrystal) {
+        entry.visual.markerMesh.position.y = 3.7 + Math.sin(elapsed * 4.0) * 0.25;
+        entry.visual.markerMesh.rotation.y = elapsed * 2.2;
+        const col = marker === 'TURN_IN' ? 0x34d399 : 0xfacc15;
+        entry.visual.markerMat.color.setHex(col);
+        entry.visual.markerMat.emissive.setHex(col);
+      }
+
+      const d = Math.hypot(entry.data.x - this.controller.x, entry.data.z - this.controller.z);
+      if (d < closestDist) {
+        closestDist = d;
+        closestCode = code;
+      }
+
+      // Project nameplate
+      const distCam = this.camera.position.distanceTo(entry.visual.group.position);
+      if (distCam > 150) {
+        entry.nameplate.style.display = 'none';
+        continue;
+      }
+      this.projVec.set(entry.data.x, entry.data.y + 4.0, entry.data.z).project(this.camera);
+      if (this.projVec.z > 1) {
+        entry.nameplate.style.display = 'none';
+        continue;
+      }
+      const sx = (this.projVec.x * 0.5 + 0.5) * window.innerWidth;
+      const sy = (-this.projVec.y * 0.5 + 0.5) * window.innerHeight;
+      entry.nameplate.style.display = 'block';
+      entry.nameplate.style.left = `${sx}px`;
+      entry.nameplate.style.top = `${sy}px`;
+
+      const badge = entry.nameplate.querySelector('.np-quest-badge') as HTMLElement | null;
+      if (badge) {
+        if (marker === 'TURN_IN') {
+          badge.textContent = '?';
+          badge.style.color = '#34d399';
+        } else if (marker === 'AVAILABLE') {
+          badge.textContent = '!';
+          badge.style.color = '#fde047';
+        } else if (marker === 'IN_PROGRESS') {
+          badge.textContent = '?';
+          badge.style.color = '#94a3b8';
+        } else {
+          badge.textContent = '';
+        }
+      }
+    }
+
+    this.nearestNpcCode = closestCode;
+    const promptEl = document.getElementById('npc-interact-prompt');
+    if (promptEl) {
+      if (closestCode && this.activeNpcModalCode === null && !this.charModalOpen && !(this.selfState?.isDead ?? false)) {
+        const npc = this.npcs.get(closestCode)?.data;
+        promptEl.textContent = `💬 Appuyez sur [E] ou cliquez pour parler à ${npc?.name ?? 'PNJ'}`;
+        promptEl.classList.add('visible');
+      } else {
+        promptEl.classList.remove('visible');
+      }
+    }
+  }
+
+  private applyQuestState(quests: QuestStatePayload, isFirst: boolean): void {
+    this.questState = quests;
+
+    for (const q of quests.active) {
+      if (q.status === 'READY' && !this.notifiedReadyQuests.has(q.code)) {
+        this.notifiedReadyQuests.add(q.code);
+        if (!isFirst) {
+          const npcName = this.npcs.get(q.turnInNpcCode)?.data.name ?? 'votre guide';
+          this.showToast(`Quête prête : ${q.title} — Retournez voir ${npcName} !`);
+        }
+      }
+    }
+
+    this.updateQuestTracker();
+    if (this.activeNpcModalCode !== null) {
+      this.renderNpcModalContent(this.activeNpcModalCode);
+    }
+  }
+
+  private updateQuestTracker(): void {
+    const qState = this.questState;
+    const counterEl = document.getElementById('qt-counter');
+    const bodyEl = document.getElementById('qt-body');
+    if (!qState || !bodyEl) return;
+
+    if (counterEl) {
+      counterEl.textContent = `${qState.completedCodes.length}/${qState.totalQuests}`;
+    }
+
+    const parts: string[] = [];
+
+    for (const q of qState.active) {
+      const ready = q.status === 'READY';
+      const turnInName = this.npcs.get(q.turnInNpcCode)?.data.name ?? q.turnInNpcCode;
+      parts.push(`
+        <div class="qt-item ${ready ? 'ready' : ''}">
+          <div class="qt-item-title">${ready ? '✅' : '⚔️'} ${this.esc(q.title)}</div>
+          <div class="qt-item-obj">
+            ${ready ? `Prête ! Parlez à <b>${this.esc(turnInName)}</b>` : `${this.esc(q.targetLabel)} : <b>${q.progress}/${q.targetCount}</b>`}
+          </div>
+          <div class="qt-dist" id="qt-dist-primary"></div>
+        </div>
+      `);
+    }
+
+    if (qState.active.length === 0) {
+      if (qState.guidance) {
+        parts.push(`
+          <div class="qt-item">
+            <div class="qt-item-title">❗ ${this.esc(qState.guidance.title)}</div>
+            <div class="qt-item-obj">${this.esc(qState.guidance.text)}</div>
+            <div class="qt-dist" id="qt-dist-primary"></div>
+          </div>
+        `);
+      } else {
+        parts.push(
+          '<div style="color:#34d399; font-size:11px;">🏆 Toutes les quêtes de La Réunion sont terminées ! Bravo !</div>',
+        );
+      }
+    }
+
+    bodyEl.innerHTML = parts.join('');
+    this.updateQuestDistanceLabel();
+  }
+
+  private updateQuestDistanceLabel(): void {
+    const distEl = document.getElementById('qt-dist-primary');
+    const g = this.questState?.guidance;
+    if (!distEl || !g) return;
+    if (g.mode === 'LEVEL_UP') {
+      distEl.textContent = 'Gagnez de l\'XP en affrontant les créatures proches';
+      return;
+    }
+    const dist = Math.round(Math.hypot(g.x - this.controller.x, g.z - this.controller.z));
+    const zoneName = this.manifest.zones[g.zoneCode]?.name ?? '';
+    distEl.textContent = `🧭 ${dist} m${zoneName ? ` · ${zoneName}` : ''}`;
+  }
+
+  private openNpcModal(npcCode: string): void {
+    const entry = this.npcs.get(npcCode);
+    if (!entry) return;
+
+    const dist = Math.hypot(entry.data.x - this.controller.x, entry.data.z - this.controller.z);
+    if (dist > 20.0) {
+      this.showToast(`Approchez-vous de ${entry.data.name} (${Math.round(dist)}m).`);
+      return;
+    }
+
+    this.activeNpcModalCode = npcCode;
+    this.controller.setInputBlocked(true);
+    document.getElementById('npc-modal')?.classList.add('open');
+    this.renderNpcModalContent(npcCode);
+  }
+
+  private closeNpcModal(): void {
+    this.activeNpcModalCode = null;
+    document.getElementById('npc-modal')?.classList.remove('open');
+    this.controller.setInputBlocked(this.charModalOpen);
+  }
+
+  private renderNpcModalContent(npcCode: string): void {
+    const entry = this.npcs.get(npcCode);
+    if (!entry) return;
+
+    const nameEl = document.getElementById('npc-modal-name');
+    const titleEl = document.getElementById('npc-modal-title');
+    const greetEl = document.getElementById('npc-modal-greeting');
+    const listEl = document.getElementById('npc-modal-quests');
+    if (nameEl) nameEl.textContent = entry.data.name;
+    if (titleEl) titleEl.textContent = entry.data.title;
+    if (greetEl) greetEl.textContent = `« ${entry.data.greeting} »`;
+    if (!listEl) return;
+
+    const qState = this.questState;
+    const allQuests = Object.values(this.manifest.quests).sort((a, b) => a.order - b.order);
+    const activeByCode = new Map(qState?.active.map((q) => [q.code, q]) ?? []);
+    const completed = new Set(qState?.completedCodes ?? []);
+    const available = new Set(qState?.availableCodes ?? []);
+    const playerLvl = this.selfState?.level ?? 1;
+
+    const cards: string[] = [];
+
+    // 1. Quests ready to turn in to this NPC
+    for (const q of allQuests) {
+      const act = activeByCode.get(q.code);
+      if (act && act.status === 'READY' && q.turnInNpcCode === npcCode) {
+        cards.push(`
+          <div class="quest-card-modal ready">
+            <h4>✅ ${this.esc(q.title)} <span class="lvl-badge">Prête</span></h4>
+            <p>« ${this.esc(q.completionText)} »</p>
+            <div class="quest-reward-line">Récompense : +${q.rewardXp} XP${q.rewardStatPoints > 0 ? ` · +${q.rewardStatPoints} pt(s) de stat` : ''}</div>
+            <button type="button" class="btn btn-lagoon" style="width:100%;" data-complete-quest="${q.code}">Rendre la quête</button>
+          </div>
+        `);
+      }
+    }
+
+    // 2. Quests available from this NPC
+    for (const q of allQuests) {
+      if (available.has(q.code) && q.giverNpcCode === npcCode) {
+        cards.push(`
+          <div class="quest-card-modal available">
+            <h4>❗ ${this.esc(q.title)} <span class="lvl-badge">Niv. ${q.recommendedLevel}</span></h4>
+            <p>${this.esc(q.description)}</p>
+            <p style="color:#e2e8f0; margin-bottom:6px;"><b>Objectif :</b> ${this.esc(q.targetLabel)} (${q.targetCount})</p>
+            <div class="quest-reward-line">Récompense : +${q.rewardXp} XP${q.rewardStatPoints > 0 ? ` · +${q.rewardStatPoints} pt(s) de stat` : ''}</div>
+            <button type="button" class="btn btn-lava" style="width:100%;" data-accept-quest="${q.code}">Accepter la quête</button>
+          </div>
+        `);
+      }
+    }
+
+    // 3. In-progress quests for this NPC
+    for (const q of allQuests) {
+      const act = activeByCode.get(q.code);
+      if (act && act.status === 'ACTIVE' && (q.giverNpcCode === npcCode || q.turnInNpcCode === npcCode)) {
+        cards.push(`
+          <div class="quest-card-modal">
+            <h4>⏳ ${this.esc(q.title)} <span style="font-size:11px; color:#94a3b8;">En cours</span></h4>
+            <p>${this.esc(q.targetLabel)} : <b>${act.progress} / ${act.targetCount}</b></p>
+          </div>
+        `);
+      }
+    }
+
+    // 4. Upcoming locked quests at this NPC (level or prerequisite not met yet)
+    for (const q of allQuests) {
+      if (q.giverNpcCode !== npcCode || completed.has(q.code) || activeByCode.has(q.code) || available.has(q.code)) {
+        continue;
+      }
+      const prereqDone = !q.prerequisiteQuestCode || completed.has(q.prerequisiteQuestCode);
+      if (prereqDone && playerLvl < q.minLevel) {
+        cards.push(`
+          <div class="quest-card-modal" style="opacity:0.7;">
+            <h4>🔒 ${this.esc(q.title)} <span style="font-size:11px; color:#fca5a5;">Requis : Niv. ${q.minLevel}</span></h4>
+            <p>Revenez me voir une fois au niveau ${q.minLevel} !</p>
+          </div>
+        `);
+      }
+    }
+
+    if (cards.length === 0) {
+      const guideHint = qState?.guidance
+        ? `<br><span style="color:#5eead4;">Conseil : ${this.esc(qState.guidance.text)}</span>`
+        : '';
+      cards.push(`<p style="color:var(--text-muted); font-size:0.88rem;">Je n'ai plus de tâche pour toi ici pour le moment.${guideHint}</p>`);
+    }
+
+    listEl.innerHTML = cards.join('');
+
+    listEl.querySelectorAll<HTMLButtonElement>('[data-accept-quest]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const code = btn.dataset.acceptQuest;
+        if (!code) return;
+        const res = await this.net.acceptQuest(this.characterId, code);
+        if (!res.ok) {
+          this.showToast(res.error ?? 'Impossible d\'accepter la quête.');
+          return;
+        }
+        if (res.self) {
+          this.selfState = res.self;
+          this.updateSelfHud();
+        }
+        if (res.quests) {
+          this.applyQuestState(res.quests, false);
+        }
+        this.showToast(`Quête acceptée : ${this.manifest.quests[code]?.title ?? code}`);
+      });
+    });
+
+    listEl.querySelectorAll<HTMLButtonElement>('[data-complete-quest]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const code = btn.dataset.completeQuest;
+        if (!code) return;
+        const res = await this.net.completeQuest(this.characterId, code);
+        if (!res.ok) {
+          this.showToast(res.error ?? 'Impossible de valider la quête.');
+          return;
+        }
+        if (res.self) {
+          this.selfState = res.self;
+          this.updateSelfHud();
+        }
+        if (res.quests) {
+          this.applyQuestState(res.quests, false);
+        }
+        const bonus = res.rewardStatPoints && res.rewardStatPoints > 0 ? ` et +${res.rewardStatPoints} pt(s) de stat` : '';
+        this.showToast(
+          res.leveledUp
+            ? `Quête validée ! +${res.rewardXp} XP${bonus} — NIVEAU ${res.newLevel} !`
+            : `Quête validée ! +${res.rewardXp} XP${bonus}`,
+        );
+      });
+    });
   }
 
   private showToast(msg: string): void {

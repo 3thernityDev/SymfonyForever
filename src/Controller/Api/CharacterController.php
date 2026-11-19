@@ -10,6 +10,7 @@ use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ZoneRepository;
 use App\Service\Game\LevelingService;
+use App\Service\Game\QuestService;
 use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatCalculator;
 use App\Service\Game\StatePayloadBuilder;
@@ -107,6 +108,7 @@ final class CharacterController extends AbstractController
         Request $request,
         CharacterRepository $characterRepository,
         ReunionTerrainService $terrainService,
+        QuestService $questService,
         StatePayloadBuilder $payloadBuilder,
         EntityManagerInterface $em,
     ): JsonResponse {
@@ -139,11 +141,13 @@ final class CharacterController extends AbstractController
             ->setZoneCode($zoneCode)
             ->setLastSeenAt($now);
 
+        $questService->onZoneEntered($character, $zoneCode);
         $em->flush();
 
         return $this->json([
             'ok' => true,
             'self' => $payloadBuilder->buildSelf($character, $now),
+            'quests' => $questService->buildQuestState($character),
         ]);
     }
 }
