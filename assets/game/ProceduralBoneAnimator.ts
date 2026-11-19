@@ -123,6 +123,8 @@ export class ProceduralBoneAnimator {
 
   public static durationForSkill(skillCode: string): number {
     switch (skillCode) {
+      case 'auto_attack':
+        return 0.38;
       case 'ember_strike':
       case 'shield_bash':
       case 'solar_flare':
@@ -168,6 +170,9 @@ export class ProceduralBoneAnimator {
     const easeTail = tail * tail * (3 - 2 * tail);
 
     switch (this.activeSkillCode) {
+      case 'auto_attack':
+        return this.animAutoAttack(t, easeTail);
+
       // ================== DPS — LAME DE LAVE ==================
       case 'ember_strike':
         return this.animEmberStrike(t, easeTail);
@@ -201,6 +206,24 @@ export class ProceduralBoneAnimator {
       default:
         return this.animEmberStrike(t, easeTail);
     }
+  }
+
+  // 0. Basic Left-Click Auto-Attack: quick snappy right-hand swing / staff bolt lunge
+  private animAutoAttack(t: number, tail: number): ProceduralPoseResult {
+    const prep = this.bell(t, 0.0, 0.32);
+    const swing = this.bell(t, 0.20, 0.88);
+
+    this.rot(this.bones.spine01, (-0.18 * swing + 0.1 * prep) * tail, (0.34 * swing - 0.28 * prep) * tail, 0);
+    this.rot(this.bones.rUpperarm, (-0.35 * prep + 1.38 * swing) * tail, 0, (-0.32 * prep + 0.48 * swing) * tail);
+    this.rot(this.bones.rForearm, (0.55 * prep + 0.35 * swing) * tail, 0, 0);
+    this.rot(this.bones.lUpperarm, (0.25 * prep - 0.28 * swing) * tail, 0, (0.28 * swing) * tail);
+
+    return {
+      bodyOffsetY: Math.sin(t * Math.PI) * 0.08,
+      bodyOffsetZ: swing * 0.34 * tail,
+      bodyYawOffset: (0.18 * swing - 0.15 * prep) * tail,
+      active: true,
+    };
   }
 
   // 1. DPS Slot 1: Quick diagonal right-to-left fiery slash

@@ -11,8 +11,10 @@ use App\Entity\Party;
 use App\Entity\User;
 use App\Entity\Zone;
 use App\Game\CharacterClass;
+use App\Repository\MonsterTemplateRepository;
 use App\Service\Game\CombatService;
 use App\Service\Game\StatCalculator;
+use App\Service\Game\WorldSeederService;
 use App\Service\Game\WorldSimulationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
@@ -116,5 +118,113 @@ final class CombatAndSimulationTest extends KernelTestCase
         self::assertGreaterThan(0, $rKill['xpGained']);
         self::assertGreaterThan(0, $tank->getXp());
         self::assertGreaterThan(0, $heal->getXp());
+    }
+
+    public function testAutoAttackThirtySecondBalanceFourSkillMaxAndClassResources(): void
+    {
+        self::getContainer()->get(WorldSeederService::class)->seed();
+        $tplRepo = self::getContainer()->get(MonsterTemplateRepository::class);
+        $crabTpl = $tplRepo->findOneByCode('crabe_recif');
+        self::assertNotNull($crabTpl);
+        self::assertSame(200, $crabTpl->getMaxHp());
+
+        $now = 5000.0;
+        $user = (new User())->setUsername('balancer')->setEmail('bal@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        // 1. Verify class resource pools & insufficient-resource rejection
+        $tank = (new Character($user, 'RageTank', CharacterClass::TANK))
+            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now);
+        $dps = (new Character($user, 'EnergyDps', CharacterClass::DPS))
+            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now);
+        $heal = (new Character($user, 'ManaHeal', CharacterClass::HEAL))
+            ->setLevel(1)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0)->setLastSeenAt($now);
+
+        self::assertSame(100, $this->stats->compute($tank)['maxMp']);
+        self::assertSame(100, $this->stats->compute($dps)['maxMp']);
+        self::assertSame(185, $this->stats->compute($heal)['maxMp']);
+
+        foreach ([$tank, $dps, $heal] as $c) {
+            $s = $this->stats->compute($c);
+            $c->setCurrentHp($s['maxHp'])->setCurrentMp(0);
+            $this->em->persist($c);
+        }
+
+        $dummy = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $this->em->persist($dummy);
+        $this->em->flush();
+
+        $noRage = $this->combat->castSkill($tank, 'shield_bash', 'MONSTER', $dummy->getId(), $now);
+        self::assertFalse($noRage['ok']);
+        self::assertSame('Rage insuffisante.', $noRage['error']);
+
+        $noEnergy = $this->combat->castSkill($dps, 'ember_strike', 'MONSTER', $dummy->getId(), $now);
+        self::assertFalse($noEnergy['ok']);
+        self::assertSame('Énergie insuffisante.', $noEnergy['error']);
+
+        $noMana = $this->combat->castSkill($heal, 'solar_flare', 'MONSTER', $dummy->getId(), $now);
+        self::assertFalse($noMana['ok']);
+        self::assertSame('Mana insuffisant.', $noMana['error']);
+
+        // 2. Auto-Attack costs 0 resource, generates Rage/Énergie/Mana, and takes ~30s (~20-34 hits) on a same-level mob
+        $aaMob = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $this->em->persist($aaMob);
+        $this->em->flush();
+
+        $t = $now + 10.0;
+        $aa1 = $this->combat->performAutoAttack($dps, 'MONSTER', $aaMob->getId(), $t);
+        self::assertTrue($aa1['ok']);
+        self::assertSame(10, $aa1['resourceGain']);
+        self::assertSame(10, $dps->getCurrentMp());
+
+        // Too rapid swing (< 1.2s) rejected, while skill GCD remains free
+        $aaTooSoon = $this->combat->performAutoAttack($dps, 'MONSTER', $aaMob->getId(), $t + 0.3);
+        self::assertFalse($aaTooSoon['ok']);
+
+        $swings = 1;
+        while ($aaMob->getState() !== MonsterInstance::STATE_DEAD && $swings < 45) {
+            $t += 1.25;
+            ++$swings;
+            $res = $this->combat->performAutoAttack($dps, 'MONSTER', $aaMob->getId(), $t);
+            self::assertTrue($res['ok']);
+        }
+        self::assertSame(MonsterInstance::STATE_DEAD, $aaMob->getState());
+        self::assertGreaterThanOrEqual(16, $swings);
+        self::assertLessThanOrEqual(34, $swings, 'Tuer un monstre de même niveau à l\'auto-attaque doit prendre ~30s.');
+
+        // Also check Tank (+15 Rage/hit) & Heal (+10 Mana/hit) generation
+        $aaTankMob = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $this->em->persist($aaTankMob);
+        $this->em->flush();
+        $aaTank = $this->combat->performAutoAttack($tank, 'MONSTER', $aaTankMob->getId(), $t + 5.0);
+        self::assertTrue($aaTank['ok']);
+        self::assertSame(15, $tank->getCurrentMp());
+
+        // 3. Using class skills kills a same-level mob in <= 4 skills MAX across DPS, TANK and HEAL
+        foreach ([
+            [$dps, 'ember_strike', 'DPS'],
+            [$tank, 'shield_bash', 'TANK'],
+            [$heal, 'solar_flare', 'HEAL'],
+        ] as [$hero, $skillCode, $label]) {
+            $s = $this->stats->compute($hero);
+            $hero->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
+            $skillMob = new MonsterInstance($crabTpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+            $this->em->persist($skillMob);
+            $this->em->flush();
+
+            $casts = 0;
+            $tCast = $t + 50.0;
+            while ($skillMob->getState() !== MonsterInstance::STATE_DEAD && $casts < 6) {
+                $tCast += 2.0;
+                ++$casts;
+                $mpBefore = $hero->getCurrentMp();
+                $r = $this->combat->castSkill($hero, $skillCode, 'MONSTER', $skillMob->getId(), $tCast);
+                self::assertTrue($r['ok'], $label.' skill '.$skillCode.' failed: '.($r['error'] ?? ''));
+                self::assertLessThan($mpBefore, $hero->getCurrentMp(), $label.' skill must consume resource.');
+            }
+            self::assertSame(MonsterInstance::STATE_DEAD, $skillMob->getState());
+            self::assertLessThanOrEqual(4, $casts, sprintf('%s doit tuer un monstre de même niveau en 4 skills max (trouvé %d).', $label, $casts));
+            $t = $tCast;
+        }
     }
 }

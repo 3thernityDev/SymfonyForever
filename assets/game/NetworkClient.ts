@@ -100,6 +100,38 @@ export class NetworkClient {
     };
   }
 
+  public async autoAttack(
+    characterId: number,
+    targetType: string | null,
+    targetId: number | null,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    self?: SelfState;
+    quests?: QuestStatePayload;
+    events?: SyncResponse['events'];
+    xpGained?: number;
+    leveledUp?: boolean;
+    resourceGain?: number;
+  }> {
+    const res = await fetch('/api/combat/attack', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId, targetType, targetId }),
+    });
+    return (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      self?: SelfState;
+      quests?: QuestStatePayload;
+      events?: SyncResponse['events'];
+      xpGained?: number;
+      leveledUp?: boolean;
+      resourceGain?: number;
+    };
+  }
+
   public async allocateStat(characterId: number, stat: string): Promise<{ ok: boolean; error?: string; self?: SelfState }> {
     const res = await fetch('/api/character/allocate-stat', {
       method: 'POST',

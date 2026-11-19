@@ -216,6 +216,54 @@ final class WorldBossRaidTest extends KernelTestCase
         self::assertStringContainsString('10 héros', $joined);
     }
 
+    public function testWorldBossOneShotsNonTankOrSubLevel10AndKillsUnbuffedLevel10TankInThreeHitsMax(): void
+    {
+        $boss = $this->monsterRepo->findWorldBosses()[0];
+        $simRef = new \ReflectionMethod(WorldSimulationService::class, 'performMonsterAttack');
+        $events = [];
+
+        // 1. Level 10 DPS, Level 10 Heal, and Level 9 Tank must ALL get ONE-SHOT in 1 swing!
+        $lvl10Dps = $this->createLevel10Hero('os_dps', 'OneShotDps', CharacterClass::DPS, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30000.0);
+        $lvl10Heal = $this->createLevel10Hero('os_heal', 'OneShotHeal', CharacterClass::HEAL, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30000.0);
+
+        $user9 = (new User())->setUsername('os_t9')->setEmail('t9@reunion.re')->setPassword('hash');
+        $this->em->persist($user9);
+        $lvl9Tank = (new Character($user9, 'TankLvl9', CharacterClass::TANK))
+            ->setLevel(9)->setZoneCode('fournaise')->setPosX($boss->getPosX() + 3)->setPosY($boss->getPosY())->setPosZ($boss->getPosZ());
+        $s9 = $this->stats->compute($lvl9Tank);
+        $lvl9Tank->setCurrentHp($s9['maxHp'])->setCurrentMp($s9['maxMp']);
+        $this->em->persist($lvl9Tank);
+        $this->em->flush();
+
+        foreach (['DPS Niv.10' => $lvl10Dps, 'Heal Niv.10' => $lvl10Heal, 'Tank Niv.9' => $lvl9Tank] as $lbl => $victim) {
+            $simRef->invokeArgs($this->sim, [$boss, $victim, 30000.0, &$events]);
+            self::assertTrue($victim->isDead(), $lbl.' doit être one-shot par le World Boss.');
+            self::assertSame(0, $victim->getCurrentHp());
+        }
+
+        // 2. Unbuffed & unhealed Level 10 Tank survives 2 hits and MUST die on the 3rd hit (3 hits max)!
+        $tank10 = $this->createLevel10Hero('tk10', 'BasaltLvl10', CharacterClass::TANK, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30010.0);
+        $this->em->flush();
+
+        $simRef->invokeArgs($this->sim, [$boss, $tank10, 30010.0, &$events]);
+        self::assertFalse($tank10->isDead(), 'Le Tank Niv.10 doit survivre au 1er coup.');
+        $simRef->invokeArgs($this->sim, [$boss, $tank10, 30012.0, &$events]);
+        self::assertFalse($tank10->isDead(), 'Le Tank Niv.10 doit encore survivre au 2e coup sans buff/soin.');
+        $simRef->invokeArgs($this->sim, [$boss, $tank10, 30014.0, &$events]);
+        self::assertTrue($tank10->isDead(), 'Le Tank Niv.10 sans buff ni soin doit mourir au 3e coup (3 coups max).');
+
+        // 3. With Peau de Basalte (basalt_skin) buff active, Level 10 Tank survives 3 hits easily!
+        $buffedTank = $this->createLevel10Hero('tk10b', 'BasaltBuffed', CharacterClass::TANK, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30020.0);
+        $this->em->flush();
+        $buffRes = $this->combat->castSkill($buffedTank, 'basalt_skin', null, null, 30020.0);
+        self::assertTrue($buffRes['ok']);
+
+        for ($i = 0; $i < 3; ++$i) {
+            $simRef->invokeArgs($this->sim, [$boss, $buffedTank, 30021.0 + $i * 2.0, &$events]);
+        }
+        self::assertFalse($buffedTank->isDead(), 'Sous Peau de Basalte (-40%), un Tank Niv.10 survit au 3e coup pour laisser le temps au Heal.');
+    }
+
     private function createLevel10Hero(
         string $username,
         string $name,

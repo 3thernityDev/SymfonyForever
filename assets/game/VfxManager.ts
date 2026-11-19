@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { CombatEventData, SkillData } from './types';
+import type { ClassCode, CombatEventData, SkillData } from './types';
 
 interface ActiveVfx {
   mesh: THREE.Object3D;
@@ -23,10 +23,14 @@ export class VfxManager {
     camera: THREE.Camera,
     sourcePos?: THREE.Vector3,
     targetPos?: THREE.Vector3,
+    sourceClassCode?: ClassCode,
   ): void {
     const pos = targetPos ? targetPos.clone() : new THREE.Vector3(ev.x, ev.y, ev.z);
     const skill = skills[ev.skillCode];
-    const colorHex = skill?.vfxColor ?? (ev.eventType === 'HEAL' || ev.eventType === 'HOT' ? '#10b981' : '#f97316');
+    const isAutoAttack = ev.skillCode === 'auto_attack';
+    const colorHex =
+      skill?.vfxColor ??
+      (isAutoAttack ? (sourceClassCode === 'HEAL' ? '#34d399' : '#fbbf24') : ev.eventType === 'HEAL' || ev.eventType === 'HOT' ? '#10b981' : '#f97316');
 
     // 1. 3D Visual Effect
     if (ev.eventType === 'LEVEL_UP') {
@@ -77,6 +81,17 @@ export class VfxManager {
           ev.isCrit ? 22 : 18,
           camera,
         );
+        return;
+      }
+
+      if (isAutoAttack) {
+        if (sourcePos && sourceClassCode === 'HEAL') {
+          this.spawnProjectile(sourcePos.clone().add(new THREE.Vector3(0, 1.8, 0)), pos.clone().add(new THREE.Vector3(0, 1.4, 0)), colorHex);
+        }
+        this.spawnBurst(pos.clone().add(new THREE.Vector3(0, 1.5, 0)), colorHex, 0.24);
+        const txtColor = ev.isCrit ? '#fde047' : '#e2e8f0';
+        const label = ev.isCrit ? `-${ev.amount}!` : `-${ev.amount}`;
+        this.spawnFloatingText(pos.clone().add(new THREE.Vector3(0, 2.7, 0)), label, txtColor, ev.isCrit ? 18 : 13, camera);
         return;
       }
 

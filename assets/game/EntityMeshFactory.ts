@@ -371,6 +371,10 @@ export function animateAvatar(
       avatar.leftArm.rotation.x = -1.35 * phase;
       avatar.rightArm.rotation.x = -1.35 * phase;
       avatar.body.position.y = 0.2 * phase;
+    } else if (code === 'auto_attack') {
+      avatar.rightArm.rotation.x = -1.45 * phase;
+      avatar.body.position.z = 0.28 * phase;
+      avatar.body.rotation.y = 0.22 * phase;
     } else {
       avatar.rightArm.rotation.x = -1.75 * phase;
       avatar.leftArm.rotation.x = -0.75 * phase;

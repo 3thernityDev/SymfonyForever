@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service\Game;
 
 use App\Entity\Character;
+use App\Game\CharacterClass;
 use App\Game\ItemRegistry;
 
 final class StatCalculator
@@ -70,7 +71,12 @@ final class StatCalculator
         $lvl = $character->getLevel();
 
         $maxHp = 80 + $vit * 12 + ($lvl - 1) * 18;
-        $maxMp = 45 + $spi * 10 + ($lvl - 1) * 8;
+        $cls = $character->getCharacterClass();
+        [$maxMp, $mpRegenPerSec] = match ($cls) {
+            CharacterClass::TANK => [100, 4.0],
+            CharacterClass::DPS => [100, 10.0],
+            CharacterClass::HEAL => [45 + $spi * 10 + ($lvl - 1) * 8, round(3.5 + $spi * 0.85, 2)],
+        };
         $attackPower = $str * 2.5 + $lvl * 3.0;
         $spellPower = $int * 2.5 + $lvl * 3.0;
         $baseReduction = $def / ($def + 95.0);
@@ -94,7 +100,7 @@ final class StatCalculator
             'damageReduction' => round(min(0.80, $totalReduction), 4),
             'critChance' => round($critChance, 4),
             'hpRegenPerSec' => round(3.0 + $vit * 0.45, 2),
-            'mpRegenPerSec' => round(3.5 + $spi * 0.85, 2),
+            'mpRegenPerSec' => $mpRegenPerSec,
             'activeDamageReductionBuff' => $buffReduction,
             'equipmentBonuses' => $eq,
         ];

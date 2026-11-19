@@ -9,6 +9,7 @@ use App\Entity\ChatMessage;
 use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Entity\Zone;
+use App\Game\CharacterClass;
 use App\Repository\CharacterRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
@@ -145,15 +146,32 @@ final class WorldSimulationService
 
         $player->setActiveEffects($remainingEffects);
 
-        // Regeneration: fast out of combat (6s), modest MP regen in combat
+        // Regeneration: fast out of combat (6s), class-specific resource flow (Rage/Énergie/Mana)
         $inCombat = ($now - $player->getLastCombatAt()) < 6.0;
+        $cls = $player->getCharacterClass();
         if (!$inCombat) {
             $hpGain = (int) round($stats['hpRegenPerSec'] * $step * 2.2);
-            $mpGain = (int) round($stats['mpRegenPerSec'] * $step * 1.8);
             $player->setCurrentHp(min($stats['maxHp'], $player->getCurrentHp() + $hpGain));
-            $player->setCurrentMp(min($stats['maxMp'], $player->getCurrentMp() + $mpGain));
+        }
+
+        if ($cls === CharacterClass::DPS) {
+            $rate = $inCombat ? 10.0 : 16.0;
+            $player->setCurrentMp(min($stats['maxMp'], $player->getCurrentMp() + (int) round($rate * $step)));
+        } elseif ($cls === CharacterClass::TANK) {
+            if ($inCombat) {
+                $player->setCurrentMp(min($stats['maxMp'], $player->getCurrentMp() + (int) round(4.0 * $step)));
+            } else {
+                // Settle toward 30 baseline Rage out of combat so Tanks can always open with Shield Bash / Taunt
+                $cur = min($stats['maxMp'], $player->getCurrentMp());
+                if ($cur < 30) {
+                    $player->setCurrentMp(min(30, $cur + (int) round(10.0 * $step)));
+                } elseif ($cur > 30) {
+                    $player->setCurrentMp(max(30, $cur - (int) round(4.0 * $step)));
+                }
+            }
         } else {
-            $mpGain = (int) round($stats['mpRegenPerSec'] * $step * 0.55);
+            $mult = $inCombat ? 0.55 : 1.8;
+            $mpGain = (int) round($stats['mpRegenPerSec'] * $step * $mult);
             $player->setCurrentMp(min($stats['maxMp'], $player->getCurrentMp() + $mpGain));
         }
     }
@@ -493,15 +511,31 @@ final class WorldSimulationService
         $template = $monster->getTemplate();
         $stats = $this->statCalculator->compute($target, $now);
 
-        $variance = 0.88 + (mt_rand(0, 240) / 1000.0);
-        $phaseMult = ($template->isWorldBoss() && $monster->getPhase() >= 2) ? 1.20 : 1.0;
-        $raw = $template->getAttack() * $phaseMult * $variance;
-        $mitigated = $raw * (1.0 - (float) $stats['damageReduction']);
-        $dmg = max(1, (int) round($mitigated));
+        if ($template->isWorldBoss()) {
+            if ($target->getCharacterClass() !== CharacterClass::TANK || $target->getLevel() < 10) {
+                // Guaranteed ONE-SHOT on non-Tank or sub-level 10 characters!
+                $dmg = max($stats['maxHp'] + 250, (int) round($stats['maxHp'] * 1.35));
+            } else {
+                // Level 10+ Tank tanks at most 3 hits unbuffed/unhealed (36.5%-39% maxHp per swing)
+                $unbuffedFactor = 0.365 + (mt_rand(0, 25) / 1000.0);
+                $buffMult = 1.0 - (float) $stats['activeDamageReductionBuff'];
+                $phaseMult = $monster->getPhase() >= 2 ? 1.15 : 1.0;
+                $dmg = max(1, (int) round($stats['maxHp'] * $unbuffedFactor * $buffMult * $phaseMult));
+            }
+        } else {
+            $variance = 0.88 + (mt_rand(0, 240) / 1000.0);
+            $raw = $template->getAttack() * $variance;
+            $mitigated = $raw * (1.0 - (float) $stats['damageReduction']);
+            $dmg = max(1, (int) round($mitigated));
+        }
 
         $target->setCurrentHp($target->getCurrentHp() - $dmg);
         $target->setLastCombatAt($now);
         $monster->setLastAttackAt($now);
+
+        if ($target->getCharacterClass() === CharacterClass::TANK && $target->getCurrentHp() > 0) {
+            $target->setCurrentMp(min($stats['maxMp'], $target->getCurrentMp() + 8));
+        }
 
         $ev = new CombatEvent(
             $monster->getZoneCode(),

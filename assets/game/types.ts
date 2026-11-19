@@ -7,6 +7,10 @@ export interface ClassMeta {
   description: string;
   color: string;
   threatMultiplier: number;
+  resourceType?: 'RAGE' | 'ENERGY' | 'MANA';
+  resourceLabel?: string;
+  resourceShort?: string;
+  resourceColor?: string;
   baseStats: Record<string, number>;
   levelGrowth: Record<string, number>;
 }
@@ -205,6 +209,11 @@ export interface SelfState {
   xpNext: number;
   statPoints: number;
   gold: number;
+  resourceType?: 'RAGE' | 'ENERGY' | 'MANA';
+  resourceLabel?: string;
+  resourceShort?: string;
+  resourceColor?: string;
+  autoAttackCooldown?: number;
   baseAttributes?: {
     vitality: number;
     strength: number;

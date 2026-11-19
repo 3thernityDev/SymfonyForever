@@ -8,6 +8,7 @@ use App\Entity\Character;
 use App\Entity\ChatMessage;
 use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
+use App\Game\CharacterClass;
 use App\Game\SkillDefinition;
 use App\Game\SkillRegistry;
 use App\Repository\CharacterRepository;
@@ -16,6 +17,8 @@ use Doctrine\ORM\EntityManagerInterface;
 
 final class CombatService
 {
+    public const float AUTO_ATTACK_COOLDOWN = 1.2;
+
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly SkillRegistry $skillRegistry,
@@ -40,6 +43,10 @@ final class CombatService
         ?int $targetId,
         ?float $now = null,
     ): array {
+        if ($skillCode === 'auto_attack') {
+            return $this->performAutoAttack($caster, $targetType, $targetId, $now);
+        }
+
         $now ??= microtime(true);
 
         if ($caster->isDead()) {
@@ -71,7 +78,7 @@ final class CombatService
         }
 
         if ($caster->getCurrentMp() < $skill->manaCost) {
-            return ['ok' => false, 'error' => 'Mana insuffisant.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+            return ['ok' => false, 'error' => $caster->getCharacterClass()->insufficientResourceError(), 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
         }
 
         $stats = $this->statCalculator->compute($caster, $now);
@@ -183,6 +190,129 @@ final class CombatService
             'events' => array_map(static fn (CombatEvent $e): array => $e->toArray(), $createdEvents),
             'xpGained' => $xpGained,
             'leveledUp' => $leveledUp,
+        ];
+    }
+
+    /**
+     * Performs a left-click basic auto-attack (0 resource cost, generates class resource,
+     * independent 1.2s swing timer, balanced to kill same-level monsters in ~30s / ~25 hits).
+     *
+     * @return array{ok: bool, error?: string, events: list<array<string, mixed>>, xpGained: int, leveledUp: bool, resourceGain?: int}
+     */
+    public function performAutoAttack(
+        Character $caster,
+        ?string $targetType,
+        ?int $targetId,
+        ?float $now = null,
+    ): array {
+        $now ??= microtime(true);
+
+        if ($caster->isDead()) {
+            return ['ok' => false, 'error' => 'Vous êtes vaincu. Ressuscitez au camp.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+        }
+
+        $cooldowns = $caster->getCooldowns();
+        if (($cooldowns['auto_attack'] ?? 0.0) > $now + 0.05) {
+            return ['ok' => false, 'error' => 'Auto-attaque en recharge.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+        }
+
+        $monster = ($targetType === 'MONSTER' && $targetId !== null)
+            ? $this->monsterRepository->find($targetId)
+            : null;
+
+        if (!$monster instanceof MonsterInstance || $monster->getState() === MonsterInstance::STATE_DEAD) {
+            return ['ok' => false, 'error' => 'Sélectionnez un ennemi vivant pour attaquer.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+        }
+
+        $cls = $caster->getCharacterClass();
+        $range = $cls === CharacterClass::HEAL ? 18.0 : 8.5;
+        $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
+        if ($dist > $range) {
+            return ['ok' => false, 'error' => sprintf('Cible trop éloignée pour l\'auto-attaque (%.0fm).', $range), 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+        }
+
+        $stats = $this->statCalculator->compute($caster, $now);
+        $primary = match ($cls) {
+            CharacterClass::HEAL => (float) $stats['spellPower'],
+            CharacterClass::TANK => ((float) $stats['attackPower'] * 0.65) + ($caster->getDefense() * 1.4),
+            default => (float) $stats['attackPower'],
+        };
+        $aaMult = match ($cls) {
+            CharacterClass::TANK => 0.175,
+            CharacterClass::HEAL => 0.150,
+            default => 0.155,
+        };
+        $levelScale = 1.0 + ($caster->getLevel() - 1) * 0.13;
+        if ($monster->getTemplate()->isWorldBoss()) {
+            $levelScale = min(1.65, $levelScale);
+        }
+
+        $raw = (2.0 + $primary * $aaMult) * $levelScale;
+        $mDef = $monster->getTemplate()->getDefense();
+        $mitigation = 1.0 - ($mDef / ($mDef + 85.0));
+        $variance = 0.94 + (mt_rand(0, 120) / 1000.0);
+        $damage = $raw * $mitigation * $variance;
+
+        $critChance = min(0.65, (float) $stats['critChance']);
+        $isCrit = (mt_rand(1, 1000) / 1000.0) <= $critChance;
+        if ($isCrit) {
+            $damage *= 1.5;
+        }
+
+        $wasIdle = $monster->getState() === MonsterInstance::STATE_IDLE;
+        $finalDamage = max(1, (int) round($damage));
+        $monster->setCurrentHp($monster->getCurrentHp() - $finalDamage);
+        $monster->setState(MonsterInstance::STATE_COMBAT);
+
+        $threatGain = $finalDamage * $cls->threatMultiplier();
+        $monster->addThreat((int) $caster->getId(), $threatGain);
+        $this->recordWorldBossEngagement($caster, $monster, (float) $finalDamage, $wasIdle);
+
+        // Generate class resource on hit
+        $resourceGain = match ($cls) {
+            CharacterClass::TANK => 15,
+            CharacterClass::DPS => 10,
+            CharacterClass::HEAL => 10,
+        };
+        $caster->setCurrentMp(min($stats['maxMp'], $caster->getCurrentMp() + $resourceGain));
+        $caster->setCooldown('auto_attack', $now + self::AUTO_ATTACK_COOLDOWN);
+        $caster->setLastCombatAt($now);
+
+        $createdEvents = [];
+        $dmgEv = new CombatEvent(
+            $monster->getZoneCode(),
+            'DAMAGE',
+            'PLAYER',
+            (int) $caster->getId(),
+            $caster->getName(),
+            'MONSTER',
+            (int) $monster->getId(),
+            $monster->getTemplate()->getName(),
+            'auto_attack',
+            $finalDamage,
+            $isCrit,
+            $monster->getPosX(),
+            $monster->getPosY(),
+            $monster->getPosZ(),
+            $now,
+        );
+        $this->em->persist($dmgEv);
+        $createdEvents[] = $dmgEv;
+
+        $xpGained = 0;
+        $leveledUp = false;
+        if ($monster->getCurrentHp() <= 0) {
+            [$xpGained, $leveledUp] = $this->handleMonsterDeath($monster, $caster, $now, $createdEvents);
+        }
+
+        $this->em->flush();
+
+        return [
+            'ok' => true,
+            'events' => array_map(static fn (CombatEvent $e): array => $e->toArray(), $createdEvents),
+            'xpGained' => $xpGained,
+            'leveledUp' => $leveledUp,
+            'resourceGain' => $resourceGain,
         ];
     }
 
@@ -390,7 +520,11 @@ final class CombatService
             default => (float) $stats['attackPower'],
         };
 
-        $raw = $skill->basePower + $scaling * $skill->powerMultiplier;
+        $levelScale = 1.0 + ($caster->getLevel() - 1) * 0.13;
+        if ($monster->getTemplate()->isWorldBoss()) {
+            $levelScale = min(1.65, $levelScale);
+        }
+        $raw = ($skill->basePower + $scaling * $skill->powerMultiplier) * $levelScale;
 
         // Execute bonus when target < 35% HP
         if ($skill->effectType === 'EXECUTE') {
@@ -421,22 +555,12 @@ final class CombatService
         $threatGain = $finalDamage * $caster->getCharacterClass()->threatMultiplier() * $skill->threatMultiplier;
         $monster->addThreat((int) $caster->getId(), $threatGain);
 
-        if ($monster->getTemplate()->isWorldBoss()) {
-            $monster->addRaidContribution((int) $caster->getId(), $finalDamage + ($skill->effectType === 'TAUNT' ? 50.0 : 0.0));
-            if ($wasIdle) {
-                $pullMsg = new ChatMessage(
-                    ChatMessage::CHANNEL_SYSTEM,
-                    'Île de La Réunion',
-                    '',
-                    sprintf(
-                        '🌋 [WORLD BOSS] %s a engagé %s au Cratère Dolomieu ! Alliez-vous jusqu\'à 10 joueurs pour un objet LÉGENDAIRE garanti !',
-                        $caster->getName(),
-                        $monster->getTemplate()->getName(),
-                    ),
-                );
-                $this->em->persist($pullMsg);
-            }
-        }
+        $this->recordWorldBossEngagement(
+            $caster,
+            $monster,
+            $finalDamage + ($skill->effectType === 'TAUNT' ? 50.0 : 0.0),
+            $wasIdle,
+        );
 
         // Handle Taunt override
         if ($skill->effectType === 'TAUNT') {
@@ -691,6 +815,28 @@ final class CombatService
         }
 
         return array_values($targetsById);
+    }
+
+    private function recordWorldBossEngagement(Character $caster, MonsterInstance $monster, float $contribution, bool $wasIdle): void
+    {
+        if (!$monster->getTemplate()->isWorldBoss()) {
+            return;
+        }
+
+        $monster->addRaidContribution((int) $caster->getId(), $contribution);
+        if ($wasIdle) {
+            $pullMsg = new ChatMessage(
+                ChatMessage::CHANNEL_SYSTEM,
+                'Île de La Réunion',
+                '',
+                sprintf(
+                    '🌋 [WORLD BOSS] %s a engagé %s au Cratère Dolomieu ! Alliez-vous jusqu\'à 10 joueurs pour un objet LÉGENDAIRE garanti !',
+                    $caster->getName(),
+                    $monster->getTemplate()->getName(),
+                ),
+            );
+            $this->em->persist($pullMsg);
+        }
     }
 
     private function distance2D(float $x1, float $z1, float $x2, float $z2): float

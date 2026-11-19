@@ -51,31 +51,31 @@ final class WorldSeederService
 
         // 2. Seed Réunion-inspired bestiary templates
         $templateSpecs = [
-            // Lagon de l'Ouest (Niv 1-3, non-agressifs près du hub)
-            ['crabe_recif', 'Crabe de Récif', 1, 75, 10, 5, 42, 10.0, 5.5, 7.5, 2.2, 18, false, false, 'crab', '#ef4444', 1.0],
-            ['tangue_sauvage', 'Tangue Épineux', 2, 110, 14, 8, 65, 11.0, 5.5, 8.5, 2.0, 20, false, false, 'tangue', '#a16207', 1.05],
-            ['guepe_cotiere', 'Guêpe des Filaos', 3, 135, 18, 8, 88, 12.0, 6.0, 9.5, 1.8, 22, true, false, 'wasp', '#eab308', 1.0],
+            // Lagon de l'Ouest (Niv 1-3, non-agressifs près du hub — ~30s à l'auto-attaque, 3-4 skills max)
+            ['crabe_recif', 'Crabe de Récif', 1, 200, 10, 5, 42, 10.0, 5.5, 7.5, 2.2, 18, false, false, false, 'crab', '#ef4444', 1.0],
+            ['tangue_sauvage', 'Tangue Épineux', 2, 290, 14, 8, 65, 11.0, 5.5, 8.5, 2.0, 20, false, false, false, 'tangue', '#a16207', 1.05],
+            ['guepe_cotiere', 'Guêpe des Filaos', 3, 390, 18, 8, 88, 12.0, 6.0, 9.5, 1.8, 22, true, false, false, 'wasp', '#eab308', 1.0],
 
             // Cirque de Salazie (Niv 3-5)
-            ['sanglier_salazie', 'Sanglier de Salazie', 4, 210, 24, 14, 135, 13.0, 5.5, 9.5, 2.0, 24, true, false, 'boar', '#78350f', 1.15],
-            ['papangue_feroce', 'Papangue Féroce', 5, 250, 30, 14, 175, 15.0, 6.5, 11.0, 1.8, 25, true, false, 'bird', '#3f3f46', 1.2],
+            ['sanglier_salazie', 'Sanglier de Salazie', 4, 520, 24, 14, 135, 13.0, 5.5, 9.5, 2.0, 24, true, false, false, 'boar', '#78350f', 1.15],
+            ['papangue_feroce', 'Papangue Féroce', 5, 650, 30, 14, 175, 15.0, 6.5, 11.0, 1.8, 25, true, false, false, 'bird', '#3f3f46', 1.2],
 
             // Cirque de Mafate (Niv 4-6)
-            ['golem_schiste', 'Golem de Schiste', 6, 360, 35, 24, 235, 14.0, 6.5, 8.0, 2.3, 28, true, false, 'golem', '#64748b', 1.35],
+            ['golem_schiste', 'Golem de Schiste', 6, 820, 35, 22, 235, 14.0, 6.5, 8.0, 2.3, 28, true, false, false, 'golem', '#64748b', 1.35],
 
             // Cirque de Cilaos (Niv 5-7)
-            ['cerf_java', 'Cerf de Java Enragé', 6, 330, 38, 18, 245, 15.0, 6.0, 11.5, 1.9, 26, true, false, 'stag', '#92400e', 1.25],
-            ['gardien_cilaos', 'Sentinelle des Thermes', 7, 440, 44, 26, 310, 14.0, 6.5, 9.0, 2.1, 30, true, false, 'golem', '#0284c7', 1.4],
+            ['cerf_java', 'Cerf de Java Enragé', 6, 780, 38, 18, 245, 15.0, 6.0, 11.5, 1.9, 26, true, false, false, 'stag', '#92400e', 1.25],
+            ['gardien_cilaos', 'Sentinelle des Thermes', 7, 1020, 44, 24, 310, 14.0, 6.5, 9.0, 2.1, 30, true, false, false, 'golem', '#0284c7', 1.4],
 
             // Sud Sauvage (Niv 6-8)
-            ['lezard_obsidienne', 'Lézard d\'Obsidienne', 7, 420, 48, 24, 325, 15.0, 6.0, 10.5, 1.8, 26, true, false, 'lizard', '#1e293b', 1.3],
+            ['lezard_obsidienne', 'Lézard d\'Obsidienne', 7, 980, 48, 24, 325, 15.0, 6.0, 10.5, 1.8, 26, true, false, false, 'lizard', '#1e293b', 1.3],
 
             // Piton des Neiges (Niv 7-9)
-            ['colosse_nuages', 'Colosse des Nuages (Élite)', 9, 820, 62, 34, 620, 17.0, 7.5, 9.5, 2.0, 40, true, true, false, 'golem', '#cbd5e1', 1.85],
+            ['colosse_nuages', 'Colosse des Nuages (Élite)', 9, 3200, 68, 34, 620, 17.0, 7.5, 9.5, 2.0, 40, true, true, false, 'golem', '#cbd5e1', 1.85],
 
             // Piton de la Fournaise (Niv 8-10 + World Boss 10 Joueurs)
-            ['molosse_magma', 'Molosse de Magma', 8, 560, 58, 28, 440, 16.0, 6.5, 10.5, 1.9, 30, true, false, false, 'hound', '#ea580c', 1.35],
-            ['seigneur_dolomieu', 'Seigneur du Dolomieu (World Boss)', 10, 28000, 215, 68, 5000, 28.0, 12.5, 9.5, 1.8, 180, true, true, true, 'boss_volcano', '#dc2626', 3.8],
+            ['molosse_magma', 'Molosse de Magma', 8, 1220, 58, 28, 440, 16.0, 6.5, 10.5, 1.9, 30, true, false, false, 'hound', '#ea580c', 1.35],
+            ['seigneur_dolomieu', 'Seigneur du Dolomieu (World Boss)', 10, 28000, 550, 68, 5000, 28.0, 12.5, 9.5, 1.8, 180, true, true, true, 'boss_volcano', '#dc2626', 3.8],
         ];
 
         $templates = [];

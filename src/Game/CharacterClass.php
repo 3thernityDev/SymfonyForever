@@ -55,6 +55,51 @@ enum CharacterClass: string
         };
     }
 
+    public function resourceType(): string
+    {
+        return match ($this) {
+            self::TANK => 'RAGE',
+            self::DPS => 'ENERGY',
+            self::HEAL => 'MANA',
+        };
+    }
+
+    public function resourceLabel(): string
+    {
+        return match ($this) {
+            self::TANK => 'Rage',
+            self::DPS => 'Énergie',
+            self::HEAL => 'Mana',
+        };
+    }
+
+    public function resourceShort(): string
+    {
+        return match ($this) {
+            self::TANK => 'RG',
+            self::DPS => 'ÉN',
+            self::HEAL => 'PM',
+        };
+    }
+
+    public function resourceColor(): string
+    {
+        return match ($this) {
+            self::TANK => '#ef4444',
+            self::DPS => '#facc15',
+            self::HEAL => '#38bdf8',
+        };
+    }
+
+    public function insufficientResourceError(): string
+    {
+        return match ($this) {
+            self::TANK => 'Rage insuffisante.',
+            self::DPS => 'Énergie insuffisante.',
+            self::HEAL => 'Mana insuffisant.',
+        };
+    }
+
     /**
      * @return array{vitality: int, strength: int, intelligence: int, defense: int, spirit: int}
      */
@@ -91,6 +136,10 @@ enum CharacterClass: string
             'description' => $this->description(),
             'color' => $this->color(),
             'threatMultiplier' => $this->threatMultiplier(),
+            'resourceType' => $this->resourceType(),
+            'resourceLabel' => $this->resourceLabel(),
+            'resourceShort' => $this->resourceShort(),
+            'resourceColor' => $this->resourceColor(),
             'baseStats' => $this->baseStats(),
             'levelGrowth' => $this->levelGrowth(),
         ];

@@ -76,12 +76,28 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertSame('lagon_ouest', $sync['zone']['code']);
         self::assertNotEmpty($sync['monsters']);
 
-        // Pick closest monster & move next to it
+        // Pick closest monster & move next to it using the current kernel's EntityManager
         $targetMonster = $sync['monsters'][0];
-        $char->setPosX((float) $targetMonster['x'] + 2.0)->setPosZ((float) $targetMonster['z']);
-        $this->em->flush();
+        $em = self::getContainer()->get(EntityManagerInterface::class);
+        $freshChar = $em->find(Character::class, $char->getId());
+        self::assertInstanceOf(Character::class, $freshChar);
+        $freshChar->setPosX((float) $targetMonster['x'] + 2.0)
+            ->setPosZ((float) $targetMonster['z'])
+            ->setCurrentMp(40);
+        $em->flush();
+        $this->client->request('POST', '/api/combat/attack', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char->getId(),
+            'targetType' => 'MONSTER',
+            'targetId' => $targetMonster['id'],
+        ]));
+        self::assertResponseIsSuccessful();
+        $aa = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertTrue($aa['ok']);
+        self::assertSame(15, $aa['resourceGain']);
+        self::assertSame(55, $aa['self']['mp']);
+        self::assertSame('RAGE', $aa['self']['resourceType']);
 
-        // 5. Cast shield_bash over HTTP
+        // 5b. Cast shield_bash over HTTP (/api/combat/cast) -> consumes 20 Rage (55 -> 35)
         $this->client->request('POST', '/api/combat/cast', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
             'characterId' => $char->getId(),
             'skillCode' => 'shield_bash',
@@ -91,6 +107,7 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertResponseIsSuccessful();
         $cast = json_decode((string) $this->client->getResponse()->getContent(), true);
         self::assertTrue($cast['ok']);
+        self::assertSame(35, $cast['self']['mp']);
         self::assertNotEmpty($cast['events']);
         self::assertSame('DAMAGE', $cast['events'][0]['eventType']);
 

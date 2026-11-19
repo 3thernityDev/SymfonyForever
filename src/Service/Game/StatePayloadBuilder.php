@@ -42,6 +42,8 @@ final class StatePayloadBuilder
         }
 
         $eq = $stats['equipmentBonuses'];
+        $cls = $c->getCharacterClass();
+        $aaEndsAt = (float) ($c->getCooldowns()['auto_attack'] ?? 0.0);
 
         return [
             'id' => $c->getId(),
@@ -52,6 +54,11 @@ final class StatePayloadBuilder
             'xpNext' => $this->statCalculator->xpForNextLevel($c->getLevel()),
             'statPoints' => $c->getStatPoints(),
             'gold' => $c->getGold(),
+            'resourceType' => $cls->resourceType(),
+            'resourceLabel' => $cls->resourceLabel(),
+            'resourceShort' => $cls->resourceShort(),
+            'resourceColor' => $cls->resourceColor(),
+            'autoAttackCooldown' => round(max(0.0, $aaEndsAt - $now), 2),
             'baseAttributes' => [
                 'vitality' => $c->getVitality(),
                 'strength' => $c->getStrength(),
@@ -70,7 +77,7 @@ final class StatePayloadBuilder
             'derived' => $stats,
             'hp' => $c->getCurrentHp(),
             'maxHp' => $stats['maxHp'],
-            'mp' => $c->getCurrentMp(),
+            'mp' => min($stats['maxMp'], $c->getCurrentMp()),
             'maxMp' => $stats['maxMp'],
             'isDead' => $c->isDead(),
             'zoneCode' => $c->getZoneCode(),

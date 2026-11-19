@@ -113,8 +113,9 @@ class SymfonyForeverGame {
   private readonly seenEventIds = new Set<number>();
   private readonly notifiedReadyQuests = new Set<string>();
   private readonly skillWasOnCd = new Map<string, boolean>();
-  private readonly skillPressTimers = new Map<number, number>();
-  private readonly skillFlashTimers = new Map<number, number>();
+  private readonly skillPressTimers = new Map<string | number, number>();
+  private readonly skillFlashTimers = new Map<string | number, number>();
+  private autoAttackInFlight = false;
   private lastQuestSignature = '';
   private lastInventorySignature = '';
 
@@ -508,6 +509,12 @@ class SymfonyForeverGame {
 
     const srcPos = this.resolveEntityPosition(ev.sourceType, ev.sourceId);
     const tgtPos = this.resolveEntityPosition(ev.targetType, ev.targetId);
+    const sourceClassCode =
+      ev.sourceType === 'PLAYER'
+        ? ev.sourceId === this.characterId
+          ? this.classCode
+          : this.remotePlayers.get(ev.sourceId)?.state.classCode
+        : undefined;
 
     // Trigger skill-specific procedural bone animation on remote players (skip passive DoT/HoT ticks)
     if (ev.sourceType === 'PLAYER' && ev.skillCode && ev.eventType !== 'DOT' && ev.eventType !== 'HOT' && ev.eventType !== 'KILL' && ev.eventType !== 'LEVEL_UP') {
@@ -517,10 +524,13 @@ class SymfonyForeverGame {
       }
     }
 
-    this.vfx.spawnFromEvent(ev, this.manifest.skills, this.camera, srcPos, tgtPos);
+    this.vfx.spawnFromEvent(ev, this.manifest.skills, this.camera, srcPos, tgtPos, sourceClassCode);
 
     // Log into Combat tab
-    const skillName = this.manifest.skills[ev.skillCode]?.name ?? ev.skillCode;
+    const skillName =
+      ev.skillCode === 'auto_attack'
+        ? 'Auto-attaque'
+        : this.manifest.skills[ev.skillCode]?.name ?? ev.skillCode;
     let line = '';
     if (ev.eventType === 'DAMAGE' || ev.eventType === 'DOT') {
       line = `<span style="color:#fca5a5">${this.esc(ev.sourceName)}</span> inflige <b>${ev.amount}</b>${ev.isCrit ? ' (CRIT!)' : ''} à ${this.esc(ev.targetName)} (${this.esc(skillName || 'Attaque')}).`;
@@ -690,7 +700,10 @@ class SymfonyForeverGame {
       }
     });
 
-    // Skill bar clicks
+    // Skill bar & Auto-Attack clicks
+    document.getElementById('skill-slot-aa')?.addEventListener('click', () => {
+      void this.performAutoAttack();
+    });
     for (let slot = 1; slot <= 4; slot++) {
       document.getElementById(`skill-slot-${slot}`)?.addEventListener('click', () => {
         void this.castSlot(slot);
@@ -839,10 +852,39 @@ class SymfonyForeverGame {
         this.openNpcModal(ud.npcCode);
         return;
       }
-      if ((ud.entityType === 'MONSTER' || ud.entityType === 'PLAYER') && ud.entityId) {
-        this.setTarget(ud.entityType, ud.entityId);
+      if (ud.entityType === 'MONSTER' && ud.entityId) {
+        this.setTarget('MONSTER', ud.entityId);
+        void this.performAutoAttack();
         return;
       }
+      if (ud.entityType === 'PLAYER' && ud.entityId) {
+        this.setTarget('PLAYER', ud.entityId);
+        return;
+      }
+    }
+
+    // Left-click on open ground: auto-attack current living enemy target (or nearest enemy within swing range)
+    const targetedMonster =
+      this.targetType === 'MONSTER' && this.targetId !== null ? this.monsters.get(this.targetId) : undefined;
+    if (targetedMonster && targetedMonster.state.state !== 'DEAD') {
+      void this.performAutoAttack();
+      return;
+    }
+
+    const aaRange = this.classCode === 'HEAL' ? 18.0 : 8.5;
+    let nearestId: number | null = null;
+    let nearestDist = aaRange;
+    for (const m of this.monsters.values()) {
+      if (m.state.state === 'DEAD') continue;
+      const d = Math.hypot(m.state.x - this.controller.x, m.state.z - this.controller.z);
+      if (d <= nearestDist) {
+        nearestDist = d;
+        nearestId = m.state.id;
+      }
+    }
+    if (nearestId !== null) {
+      this.setTarget('MONSTER', nearestId);
+      void this.performAutoAttack();
     }
   }
 
@@ -878,8 +920,9 @@ class SymfonyForeverGame {
     this.updateTargetHud();
   }
 
-  private flashSkillButton(slot: number, mode: 'press' | 'cast' | 'reject' | 'ready'): void {
-    const btn = document.getElementById(`skill-slot-${slot}`);
+  private flashSkillButton(slot: number | 'aa', mode: 'press' | 'cast' | 'reject' | 'ready'): void {
+    const id = slot === 'aa' ? 'skill-slot-aa' : `skill-slot-${slot}`;
+    const btn = document.getElementById(id);
     if (!btn) return;
 
     if (mode === 'press') {
@@ -919,6 +962,51 @@ class SymfonyForeverGame {
         this.skillFlashTimers.delete(slot);
       }, 460),
     );
+  }
+
+  private async performAutoAttack(): Promise<void> {
+    if (!this.selfState || this.selfState.isDead || this.autoAttackInFlight) return;
+    if ((this.selfState.autoAttackCooldown ?? 0) > 0.08) return;
+
+    this.flashSkillButton('aa', 'press');
+
+    if (this.targetType !== 'MONSTER' || this.targetId === null) {
+      this.cycleNearestMonster();
+    }
+    if (this.targetType !== 'MONSTER' || this.targetId === null) {
+      this.flashSkillButton('aa', 'reject');
+      return;
+    }
+
+    this.autoAttackInFlight = true;
+    try {
+      const res = await this.net.autoAttack(this.characterId, this.targetType, this.targetId);
+      if (!res.ok) {
+        this.flashSkillButton('aa', 'reject');
+        if (res.error && res.error !== 'Auto-attaque en recharge.') this.showToast(res.error);
+        return;
+      }
+
+      this.flashSkillButton('aa', 'cast');
+      this.faceCurrentTarget();
+      triggerAvatarSkill(this.selfAvatar, 'auto_attack');
+
+      if (res.self) {
+        this.selfState = res.self;
+        this.updateSelfHud();
+      }
+      if (res.quests) {
+        this.applyQuestState(res.quests, false);
+      }
+      if (res.events) {
+        for (const ev of res.events) {
+          if (ev.id > this.lastEventId) this.lastEventId = ev.id;
+          this.handleCombatEvent(ev);
+        }
+      }
+    } finally {
+      this.autoAttackInFlight = false;
+    }
   }
 
   private faceCurrentTarget(): void {
@@ -979,14 +1067,34 @@ class SymfonyForeverGame {
   }
 
   private renderSkillButtonsStructure(): void {
+    const clsMeta = this.manifest.classes[this.classCode];
+    const resShort = clsMeta?.resourceShort ?? 'PM';
+    const resLabel = clsMeta?.resourceLabel ?? 'Mana';
+    const resColor = clsMeta?.resourceColor ?? '#38bdf8';
+    const aaGain = this.classCode === 'TANK' ? 15 : 10;
+
+    const aaBtn = document.getElementById('skill-slot-aa');
+    if (aaBtn) {
+      aaBtn.style.setProperty('--skill-glow', '#fde047');
+      aaBtn.title = `Auto-attaque (Clic gauche) — Coûte 0, génère +${aaGain} ${resLabel} par coup (1.2s). Tuer un ennemi de même niveau prend ~30s à l'auto-attaque (4 sorts max avec vos compétences).`;
+      aaBtn.innerHTML = `
+        <span class="skill-key">Clic G.</span>
+        <span class="skill-mana" style="color:${resColor};">+${aaGain} ${resShort}</span>
+        <span class="skill-icon">⚔️</span>
+        <span class="skill-name">Auto-attaque</span>
+        <div class="skill-cd-sweep"></div>
+        <div class="skill-cd-overlay"></div>
+      `;
+    }
+
     for (const skill of this.classSkills) {
       const btn = document.getElementById(`skill-slot-${skill.slot}`);
       if (!btn) continue;
       btn.style.setProperty('--skill-glow', skill.vfxColor);
-      btn.title = `${skill.name} (Niv. ${skill.unlockLevel}) — ${skill.manaCost} PM, CD ${skill.cooldown}s\n${skill.description}`;
+      btn.title = `${skill.name} (Niv. ${skill.unlockLevel}) — ${skill.manaCost} ${resLabel}, CD ${skill.cooldown}s\n${skill.description}`;
       btn.innerHTML = `
         <span class="skill-key">${skill.slot}</span>
-        <span class="skill-mana">${skill.manaCost}</span>
+        <span class="skill-mana" style="color:${resColor};">${skill.manaCost} ${resShort}</span>
         <span class="skill-icon">${skill.icon}</span>
         <span class="skill-name">${this.esc(skill.name)}</span>
         <div class="skill-cd-sweep"></div>
@@ -1000,8 +1108,33 @@ class SymfonyForeverGame {
     if (this.selfState.gcdRemaining > 0) {
       this.selfState.gcdRemaining = Math.max(0, this.selfState.gcdRemaining - dt);
     }
+    if ((this.selfState.autoAttackCooldown ?? 0) > 0) {
+      this.selfState.autoAttackCooldown = Math.max(0, (this.selfState.autoAttackCooldown ?? 0) - dt);
+    }
     for (const k of Object.keys(this.selfState.cooldowns)) {
       this.selfState.cooldowns[k] = Math.max(0, this.selfState.cooldowns[k] - dt);
+    }
+
+    // Auto-Attack 1.2s swing timer indicator
+    const aaBtn = document.getElementById('skill-slot-aa');
+    if (aaBtn) {
+      const aaRem = this.selfState.autoAttackCooldown ?? 0;
+      const aaOverlay = aaBtn.querySelector('.skill-cd-overlay') as HTMLElement | null;
+      const aaSweep = aaBtn.querySelector('.skill-cd-sweep') as HTMLElement | null;
+      if (aaRem > 0.05) {
+        aaBtn.classList.add('on-cd');
+        if (aaOverlay) aaOverlay.textContent = aaRem.toFixed(1);
+        if (aaSweep) aaSweep.style.height = `${Math.min(100, (aaRem / 1.2) * 100)}%`;
+        this.skillWasOnCd.set('auto_attack', true);
+      } else {
+        aaBtn.classList.remove('on-cd');
+        if (aaOverlay) aaOverlay.textContent = '';
+        if (aaSweep) aaSweep.style.height = '0%';
+        if (this.skillWasOnCd.get('auto_attack')) {
+          this.skillWasOnCd.set('auto_attack', false);
+          this.flashSkillButton('aa', 'ready');
+        }
+      }
     }
 
     const gcdTotal = this.manifest.gcd || 1.4;
@@ -1059,10 +1192,23 @@ class SymfonyForeverGame {
       if (el) el.style.width = `${Math.max(0, Math.min(100, pct))}%`;
     };
 
+    const clsMeta = this.manifest.classes[s.classCode];
+    const resType = s.resourceType ?? clsMeta?.resourceType ?? 'MANA';
+    const resLabel = s.resourceLabel ?? clsMeta?.resourceLabel ?? 'Mana';
+    const mpFill = document.getElementById('hud-mp-fill');
+    if (mpFill) {
+      mpFill.style.background =
+        resType === 'RAGE'
+          ? 'linear-gradient(90deg, #b91c1c, #f97316)'
+          : resType === 'ENERGY'
+            ? 'linear-gradient(90deg, #ca8a04, #facc15)'
+            : 'linear-gradient(90deg, #2563eb, #38bdf8)';
+    }
+
     setText('hud-level', String(s.level));
     setText('hud-gold', `🪙 ${s.gold ?? 0}`);
     setText('hud-hp-text', `${s.hp} / ${s.maxHp}`);
-    setText('hud-mp-text', `${s.mp} / ${s.maxMp}`);
+    setText('hud-mp-text', `${resLabel} ${s.mp} / ${s.maxMp}`);
     setWidth('hud-hp-fill', (s.hp / Math.max(1, s.maxHp)) * 100);
     setWidth('hud-mp-fill', (s.mp / Math.max(1, s.maxMp)) * 100);
 
