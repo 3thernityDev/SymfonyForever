@@ -38,16 +38,17 @@ COPY --from=frontend /app/public/build ./public/build
 # Generate authoritative autoloader + vendor/autoload_runtime.php (via symfony/runtime plugin)
 RUN composer dump-autoload --no-dev --classmap-authoritative --no-interaction
 
-# Production PHP tuning
+# Production PHP tuning (persist PHP sessions on /data/sessions so Fly restarts never log out players!)
 RUN mv "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" && \
-    printf "opcache.enable=1\nopcache.memory_consumption=128\nopcache.max_accelerated_files=20000\nopcache.validate_timestamps=0\nmemory_limit=256M\n" \
+    printf "opcache.enable=1\nopcache.memory_consumption=128\nopcache.max_accelerated_files=20000\nopcache.validate_timestamps=0\nmemory_limit=256M\nsession.save_path=/data/sessions\nsession.gc_maxlifetime=86400\n" \
     > "$PHP_INI_DIR/conf.d/symfonyforever.ini"
 
-# Pre-generate La Réunion map binary/PNGs & warm Symfony prod cache
-RUN mkdir -p /data /app/var/cache /app/var/log /app/var/map && \
+# Pre-generate La Réunion map binary/PNGs, schema fingerprint & warm Symfony prod cache
+RUN mkdir -p /data/sessions /app/var/cache /app/var/log /app/var/map && \
     php bin/console app:world:generate-map --env=prod --no-interaction && \
     php bin/console cache:clear --env=prod --no-warmup && \
-    php bin/console cache:warmup --env=prod
+    php bin/console cache:warmup --env=prod && \
+    cat src/Entity/*.php src/Service/Game/WorldSeederService.php | sha256sum | awk '{print $1}' > /app/.schema_version
 
 # Install Caddyfile and Linux-normalized entrypoint
 COPY docker/Caddyfile /etc/caddy/Caddyfile

@@ -1,5 +1,11 @@
 import type { InventoryStatePayload, ManifestResponse, QuestStatePayload, SelfState, SyncResponse } from './types';
 
+export type SyncOutcome =
+  | { status: 'ok'; data: SyncResponse }
+  | { status: 'busy' }
+  | { status: 'auth_expired' }
+  | { status: 'error' };
+
 export class NetworkClient {
   public lastPingMs = 0;
   private syncing = false;
@@ -24,23 +30,41 @@ export class NetworkClient {
     targetId: number | null;
     lastEventId: number;
     lastChatId: number;
-  }): Promise<SyncResponse | null> {
-    if (this.syncing) return null;
+  }): Promise<SyncOutcome> {
+    if (this.syncing) return { status: 'busy' };
     this.syncing = true;
     const t0 = performance.now();
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 6000);
     try {
       const res = await fetch('/api/world/sync', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
       this.lastPingMs = Math.round(performance.now() - t0);
-      if (!res.ok) return null;
-      return (await res.json()) as SyncResponse;
+
+      // Detect session expiration (Symfony form_login redirects /api/* to /login HTML or returns 401/403)
+      const contentType = res.headers.get('content-type') ?? '';
+      if (res.status === 401 || res.status === 403 || (res.redirected && res.url.includes('/login')) || !contentType.includes('application/json')) {
+        if (res.status === 401 || res.status === 403 || res.url.includes('/login')) {
+          return { status: 'auth_expired' };
+        }
+        return { status: 'error' };
+      }
+
+      if (!res.ok) return { status: 'error' };
+      const data = (await res.json()) as SyncResponse;
+      return { status: 'ok', data };
     } catch {
-      return null;
+      return { status: 'error' };
     } finally {
+      window.clearTimeout(timer);
       this.syncing = false;
     }
   }

@@ -181,7 +181,7 @@ class SymfonyForeverGame {
       this.renderSkillButtonsStructure();
 
       setStatus('Synchronisation HTTP avec le serveur Symfony...');
-      const initialSync = await this.net.syncWorld({
+      const initialOutcome = await this.net.syncWorld({
         characterId: this.characterId,
         x: this.controller.x,
         z: this.controller.z,
@@ -193,9 +193,13 @@ class SymfonyForeverGame {
         lastChatId: 0,
       });
 
-      if (initialSync) {
-        this.controller.teleport(initialSync.self.x, initialSync.self.y, initialSync.self.z);
-        this.applySync(initialSync, true);
+      if (initialOutcome.status === 'auth_expired') {
+        window.location.href = '/login';
+        return;
+      }
+      if (initialOutcome.status === 'ok') {
+        this.controller.teleport(initialOutcome.data.self.x, initialOutcome.data.self.y, initialOutcome.data.self.z);
+        this.applySync(initialOutcome.data, true);
       }
 
       document.getElementById('loading-screen')?.remove();
@@ -319,7 +323,7 @@ class SymfonyForeverGame {
   private async performSync(): Promise<void> {
     if (this.net.isSyncing()) return;
 
-    const resp = await this.net.syncWorld({
+    const outcome = await this.net.syncWorld({
       characterId: this.characterId,
       x: Number(this.controller.x.toFixed(2)),
       z: Number(this.controller.z.toFixed(2)),
@@ -331,18 +335,30 @@ class SymfonyForeverGame {
       lastChatId: this.lastChatId,
     });
 
+    if (outcome.status === 'busy') return;
+
     const netDot = document.getElementById('net-dot');
     const netPing = document.getElementById('net-ping');
-    if (!resp) {
+
+    if (outcome.status === 'auth_expired') {
+      if (netDot) netDot.style.background = '#ef4444';
+      if (netPing) {
+        netPing.innerHTML = '<a href="/login" style="color:#fca5a5; text-decoration:underline;">Session expirée (Reconnecter)</a>';
+      }
+      this.showToast('Session expirée — cliquez sur Reconnecter ou rechargez la page.');
+      return;
+    }
+
+    if (outcome.status === 'error') {
       if (netDot) netDot.style.background = '#ef4444';
       if (netPing) netPing.textContent = 'Reconnexion...';
       return;
     }
 
-    if (netDot) netDot.style.background = this.net.lastPingMs < 180 ? '#22c55e' : '#facc15';
+    if (netDot) netDot.style.background = this.net.lastPingMs < 220 ? '#22c55e' : '#facc15';
     if (netPing) netPing.textContent = `HTTP ${this.net.lastPingMs} ms`;
 
-    this.applySync(resp, false);
+    this.applySync(outcome.data, false);
   }
 
   private applySync(resp: SyncResponse, isFirst: boolean): void {
