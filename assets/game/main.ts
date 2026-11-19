@@ -5,6 +5,7 @@ import {
   createMonsterMesh,
   createNpcMesh,
   createPlayerAvatar,
+  triggerAvatarSkill,
   type AnimatedAvatar,
   type LootVisual,
   type MonsterVisual,
@@ -107,6 +108,9 @@ class SymfonyForeverGame {
   private readonly lootDrops = new Map<number, LootEntry>();
   private readonly seenEventIds = new Set<number>();
   private readonly notifiedReadyQuests = new Set<string>();
+  private readonly skillWasOnCd = new Map<string, boolean>();
+  private readonly skillPressTimers = new Map<number, number>();
+  private readonly skillFlashTimers = new Map<number, number>();
   private lastQuestSignature = '';
   private lastInventorySignature = '';
 
@@ -493,13 +497,11 @@ class SymfonyForeverGame {
     const srcPos = this.resolveEntityPosition(ev.sourceType, ev.sourceId);
     const tgtPos = this.resolveEntityPosition(ev.targetType, ev.targetId);
 
-    // Trigger remote attack animation
-    if (ev.sourceType === 'PLAYER') {
-      if (ev.sourceId === this.characterId) {
-        this.selfAvatar.attackTimer = 0.4;
-      } else {
+    // Trigger skill-specific procedural bone animation on remote players (skip passive DoT/HoT ticks)
+    if (ev.sourceType === 'PLAYER' && ev.skillCode && ev.eventType !== 'DOT' && ev.eventType !== 'HOT' && ev.eventType !== 'KILL' && ev.eventType !== 'LEVEL_UP') {
+      if (ev.sourceId !== this.characterId) {
         const rp = this.remotePlayers.get(ev.sourceId);
-        if (rp) rp.avatar.attackTimer = 0.4;
+        if (rp) triggerAvatarSkill(rp.avatar, ev.skillCode);
       }
     }
 
@@ -851,11 +853,70 @@ class SymfonyForeverGame {
     this.updateTargetHud();
   }
 
+  private flashSkillButton(slot: number, mode: 'press' | 'cast' | 'reject' | 'ready'): void {
+    const btn = document.getElementById(`skill-slot-${slot}`);
+    if (!btn) return;
+
+    if (mode === 'press') {
+      const prev = this.skillPressTimers.get(slot);
+      if (prev !== undefined) window.clearTimeout(prev);
+      btn.classList.add('skill-pressed');
+      this.skillPressTimers.set(
+        slot,
+        window.setTimeout(() => {
+          btn.classList.remove('skill-pressed');
+          this.skillPressTimers.delete(slot);
+        }, 140),
+      );
+      return;
+    }
+
+    if (mode === 'cast' || mode === 'reject') {
+      const prevPress = this.skillPressTimers.get(slot);
+      if (prevPress !== undefined) {
+        window.clearTimeout(prevPress);
+        this.skillPressTimers.delete(slot);
+      }
+      btn.classList.remove('skill-pressed');
+    }
+
+    const prevFlash = this.skillFlashTimers.get(slot);
+    if (prevFlash !== undefined) window.clearTimeout(prevFlash);
+
+    const cls = mode === 'cast' ? 'skill-cast-flash' : mode === 'reject' ? 'skill-rejected' : 'skill-ready-flash';
+    btn.classList.remove('skill-cast-flash', 'skill-rejected', 'skill-ready-flash');
+    void btn.offsetWidth; // force CSS animation restart on rapid presses
+    btn.classList.add(cls);
+    this.skillFlashTimers.set(
+      slot,
+      window.setTimeout(() => {
+        btn.classList.remove(cls);
+        this.skillFlashTimers.delete(slot);
+      }, 460),
+    );
+  }
+
+  private faceCurrentTarget(): void {
+    if (!this.targetType || !this.targetId) return;
+    if (this.targetType === 'PLAYER' && this.targetId === this.characterId) return;
+    const pos = this.resolveEntityPosition(this.targetType, this.targetId);
+    if (!pos) return;
+    const dx = pos.x - this.controller.x;
+    const dz = pos.z - this.controller.z;
+    if (Math.hypot(dx, dz) > 0.25) {
+      this.controller.rotY = Math.atan2(dx, dz);
+    }
+  }
+
   private async castSlot(slot: number): Promise<void> {
     const skill = this.classSkills.find((s) => s.slot === slot);
     if (!skill || !this.selfState) return;
 
+    // Immediate tactile visual press feedback on key 1-4 / click
+    this.flashSkillButton(slot, 'press');
+
     if (this.selfState.level < skill.unlockLevel) {
+      this.flashSkillButton(slot, 'reject');
       this.showToast(`${skill.name} se débloque au niveau ${skill.unlockLevel}.`);
       return;
     }
@@ -867,11 +928,16 @@ class SymfonyForeverGame {
 
     const res = await this.net.castSkill(this.characterId, skill.code, this.targetType, this.targetId);
     if (!res.ok) {
+      this.flashSkillButton(slot, 'reject');
       if (res.error) this.showToast(res.error);
       return;
     }
 
-    this.selfAvatar.attackTimer = 0.4;
+    // Confirmed cast: icon burst flash + auto-face target + skill-specific procedural bone animation!
+    this.flashSkillButton(slot, 'cast');
+    this.faceCurrentTarget();
+    triggerAvatarSkill(this.selfAvatar, skill.code);
+
     if (res.self) {
       this.selfState = res.self;
       this.updateSelfHud();
@@ -891,12 +957,14 @@ class SymfonyForeverGame {
     for (const skill of this.classSkills) {
       const btn = document.getElementById(`skill-slot-${skill.slot}`);
       if (!btn) continue;
+      btn.style.setProperty('--skill-glow', skill.vfxColor);
       btn.title = `${skill.name} (Niv. ${skill.unlockLevel}) — ${skill.manaCost} PM, CD ${skill.cooldown}s\n${skill.description}`;
       btn.innerHTML = `
         <span class="skill-key">${skill.slot}</span>
         <span class="skill-mana">${skill.manaCost}</span>
         <span class="skill-icon">${skill.icon}</span>
         <span class="skill-name">${this.esc(skill.name)}</span>
+        <div class="skill-cd-sweep"></div>
         <div class="skill-cd-overlay"></div>
       `;
     }
@@ -911,25 +979,39 @@ class SymfonyForeverGame {
       this.selfState.cooldowns[k] = Math.max(0, this.selfState.cooldowns[k] - dt);
     }
 
+    const gcdTotal = this.manifest.gcd || 1.4;
     for (const skill of this.classSkills) {
       const btn = document.getElementById(`skill-slot-${skill.slot}`);
       if (!btn) continue;
       const locked = this.selfState.level < skill.unlockLevel;
       btn.classList.toggle('locked', locked);
       const overlay = btn.querySelector('.skill-cd-overlay') as HTMLElement | null;
+      const sweep = btn.querySelector('.skill-cd-sweep') as HTMLElement | null;
       if (!overlay) continue;
 
       if (locked) {
         btn.classList.add('on-cd');
         overlay.textContent = `N.${skill.unlockLevel}`;
+        if (sweep) sweep.style.height = '0%';
       } else {
-        const rem = Math.max(this.selfState.gcdRemaining, this.selfState.cooldowns[skill.code] ?? 0);
+        const skillRem = this.selfState.cooldowns[skill.code] ?? 0;
+        const gcdRem = this.selfState.gcdRemaining;
+        const rem = Math.max(gcdRem, skillRem);
+        const total = skillRem >= gcdRem ? Math.max(0.5, skill.cooldown) : gcdTotal;
+
         if (rem > 0.05) {
           btn.classList.add('on-cd');
           overlay.textContent = rem.toFixed(1);
+          if (sweep) sweep.style.height = `${Math.min(100, (rem / total) * 100)}%`;
+          this.skillWasOnCd.set(skill.code, true);
         } else {
           btn.classList.remove('on-cd');
           overlay.textContent = '';
+          if (sweep) sweep.style.height = '0%';
+          if (this.skillWasOnCd.get(skill.code)) {
+            this.skillWasOnCd.set(skill.code, false);
+            this.flashSkillButton(skill.slot, 'ready');
+          }
         }
       }
     }

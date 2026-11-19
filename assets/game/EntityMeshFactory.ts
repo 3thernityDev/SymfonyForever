@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { instantiateTikafRig, TIKAF_FOOT_SPEED_AT_1X } from './ModelAssetCache';
+import { ProceduralBoneAnimator } from './ProceduralBoneAnimator';
 import type { ClassCode } from './types';
 
 export interface AnimatedAvatar {
@@ -12,9 +13,22 @@ export interface AnimatedAvatar {
   rightLeg: THREE.Object3D;
   targetRing: THREE.Mesh;
   attackTimer: number;
+  activeSkillCode: string | null;
+  activeSkillDuration: number;
   fbxRoot: THREE.Group | null;
   fbxMixer: THREE.AnimationMixer | null;
   fbxWalkAction: THREE.AnimationAction | null;
+  boneAnimator: ProceduralBoneAnimator | null;
+}
+
+export function triggerAvatarSkill(avatar: AnimatedAvatar, skillCode: string): void {
+  const dur = ProceduralBoneAnimator.durationForSkill(skillCode);
+  avatar.activeSkillCode = skillCode;
+  avatar.activeSkillDuration = dur;
+  avatar.attackTimer = dur;
+  if (avatar.boneAnimator) {
+    avatar.boneAnimator.triggerSkill(skillCode);
+  }
 }
 
 const mat = (color: number | string, roughness = 0.65, metalness = 0.15, emissive?: number | string) =>
@@ -176,9 +190,12 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     rightLeg,
     targetRing,
     attackTimer: 0,
+    activeSkillCode: null,
+    activeSkillDuration: 0.5,
     fbxRoot: null,
     fbxMixer: null,
     fbxWalkAction: null,
+    boneAnimator: null,
   };
 
   // Attach custom animated 3D Tikaf.fbx model to the DPS class!
@@ -193,6 +210,7 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
         avatar.fbxRoot = rig.root;
         avatar.fbxMixer = rig.mixer;
         avatar.fbxWalkAction = rig.walkAction;
+        avatar.boneAnimator = new ProceduralBoneAnimator(rig.root);
       })
       .catch((err) => {
         console.warn('Impossible de charger Tikaf.fbx, fallback procédural actif :', err);
@@ -216,24 +234,24 @@ export function animateAvatar(
     return;
   }
 
-  // Custom FBX SkinnedMesh animation path (Tikaf for DPS) — strictly distance-driven to eliminate foot sliding!
+  // Custom FBX SkinnedMesh animation path (Tikaf + all future characters using the same biped rig!)
   if (avatar.fbxRoot) {
     const speed = dt > 0.0001 ? distanceMoved / dt : 0;
     const activelyMoving = distanceMoved > 0.0015 || (isMoving && distanceMoved > 0.0002);
-    let targetTiltX = activelyMoving ? Math.min(0.14, speed * 0.012) : 0.0;
-    let targetLungeZ = 0.0;
 
+    // 1. Restore base bone rotations before mixer updates so procedural additive offsets never drift
+    avatar.boneAnimator?.restoreBasePose();
+
+    // 2. Drive base locomotion strictly by actual ground distance moved (zero foot sliding!)
     if (avatar.fbxMixer && avatar.fbxWalkAction) {
       const clipLen = avatar.fbxWalkAction.getClip().duration || 2.3333;
       const halfCycle = clipLen * 0.5;
       if (activelyMoving) {
-        // Exact match: feet sweep backward at the same speed the character moves forward
         const exactAnimStep = distanceMoved / TIKAF_FOOT_SPEED_AT_1X;
         const clampedStep = Math.min(exactAnimStep, dt * 5.2);
         avatar.fbxWalkAction.paused = false;
         avatar.fbxMixer.update(clampedStep);
       } else {
-        // Smoothly settle onto the nearest double-support grounded frame (t = 0.28s or 1.45s)
         const posInHalf = avatar.fbxWalkAction.time % halfCycle;
         const restPhase = 0.28;
         let deltaToRest = restPhase - posInHalf;
@@ -252,25 +270,29 @@ export function animateAvatar(
       }
     }
 
+    // 3. Snapshot clean post-mixer pose, then layer skill-specific procedural bone animation on top!
+    avatar.boneAnimator?.captureBasePose();
+    const skillPose = avatar.boneAnimator
+      ? avatar.boneAnimator.apply(dt)
+      : { bodyOffsetY: 0, bodyOffsetZ: 0, bodyYawOffset: 0, active: false };
+
     if (avatar.attackTimer > 0) {
       avatar.attackTimer = Math.max(0, avatar.attackTimer - dt);
-      const phase = Math.sin((avatar.attackTimer / 0.4) * Math.PI);
-      targetTiltX = 0.32 * phase;
-      targetLungeZ = 0.65 * phase;
-      if (avatar.fbxMixer && avatar.fbxWalkAction) {
-        avatar.fbxWalkAction.paused = false;
-        avatar.fbxMixer.update(dt * 2.4);
-      }
     }
 
-    avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, targetTiltX, Math.min(1, dt * 14));
-    avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, targetLungeZ, Math.min(1, dt * 16));
-    avatar.body.position.y = activelyMoving ? 0 : Math.sin(time * 2.2) * 0.02;
+    const baseTiltX = activelyMoving ? Math.min(0.12, speed * 0.011) : 0.0;
+    const baseBobY = activelyMoving ? 0 : Math.sin(time * 2.2) * 0.02;
+
+    avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, baseTiltX, Math.min(1, dt * 14));
+    avatar.body.rotation.y = THREE.MathUtils.lerp(avatar.body.rotation.y, skillPose.bodyYawOffset, Math.min(1, dt * 18));
+    avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, skillPose.bodyOffsetZ, Math.min(1, dt * 18));
+    avatar.body.position.y = THREE.MathUtils.lerp(avatar.body.position.y, baseBobY + skillPose.bodyOffsetY, Math.min(1, dt * 20));
     return;
   }
 
-  // Procedural low-poly animation path (Tank & Heal)
+  // Procedural low-poly animation path (Tank & Heal until their FBX models are added)
   avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, 0, Math.min(1, dt * 10));
+  avatar.body.rotation.y = THREE.MathUtils.lerp(avatar.body.rotation.y, 0, Math.min(1, dt * 12));
   avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, 0, Math.min(1, dt * 12));
 
   if (isMoving || distanceMoved > 0.002) {
@@ -280,20 +302,62 @@ export function animateAvatar(
     avatar.rightLeg.rotation.x = -swing;
     avatar.leftArm.rotation.x = -swing * 0.55;
     avatar.rightArm.rotation.x = swing * 0.55;
+    avatar.leftArm.rotation.z = THREE.MathUtils.lerp(avatar.leftArm.rotation.z, 0, Math.min(1, dt * 10));
+    avatar.rightArm.rotation.z = THREE.MathUtils.lerp(avatar.rightArm.rotation.z, 0, Math.min(1, dt * 10));
     avatar.body.position.y = Math.abs(Math.sin(time * freq)) * 0.14;
   } else {
     avatar.leftLeg.rotation.x = THREE.MathUtils.lerp(avatar.leftLeg.rotation.x, 0, Math.min(1, dt * 10));
     avatar.rightLeg.rotation.x = THREE.MathUtils.lerp(avatar.rightLeg.rotation.x, 0, Math.min(1, dt * 10));
     avatar.leftArm.rotation.x = THREE.MathUtils.lerp(avatar.leftArm.rotation.x, 0, Math.min(1, dt * 10));
     avatar.rightArm.rotation.x = THREE.MathUtils.lerp(avatar.rightArm.rotation.x, 0, Math.min(1, dt * 10));
+    avatar.leftArm.rotation.z = THREE.MathUtils.lerp(avatar.leftArm.rotation.z, 0, Math.min(1, dt * 10));
+    avatar.rightArm.rotation.z = THREE.MathUtils.lerp(avatar.rightArm.rotation.z, 0, Math.min(1, dt * 10));
     avatar.body.position.y = Math.sin(time * 2.6) * 0.04;
   }
 
   if (avatar.attackTimer > 0) {
     avatar.attackTimer = Math.max(0, avatar.attackTimer - dt);
-    const phase = Math.sin((avatar.attackTimer / 0.4) * Math.PI);
-    avatar.rightArm.rotation.x = -1.6 * phase;
-    avatar.leftArm.rotation.x = -0.8 * phase;
+    const t = 1 - avatar.attackTimer / Math.max(0.1, avatar.activeSkillDuration);
+    const phase = Math.sin(t * Math.PI);
+    const code = avatar.activeSkillCode;
+
+    if (code === 'shield_bash') {
+      avatar.leftArm.rotation.x = -1.7 * phase;
+      avatar.body.position.z = 0.65 * phase;
+      avatar.body.rotation.y = -0.35 * phase;
+    } else if (code === 'piton_taunt') {
+      avatar.leftArm.rotation.z = 1.15 * phase;
+      avatar.rightArm.rotation.z = -1.15 * phase;
+      avatar.body.rotation.x = -0.25 * phase;
+    } else if (code === 'basalt_skin') {
+      avatar.leftArm.rotation.x = -1.2 * phase;
+      avatar.rightArm.rotation.x = -1.2 * phase;
+      avatar.leftArm.rotation.z = -0.55 * phase;
+      avatar.rightArm.rotation.z = 0.55 * phase;
+    } else if (code === 'seismic_slam' || code === 'volcanic_fury') {
+      const jump = t < 0.55 ? Math.sin((t / 0.55) * Math.PI) * 1.0 : 0;
+      avatar.body.position.y = jump;
+      avatar.leftArm.rotation.x = t < 0.45 ? -2.4 * phase : 0.4 * phase;
+      avatar.rightArm.rotation.x = t < 0.45 ? -2.4 * phase : 0.4 * phase;
+    } else if (code === 'lagoon_blessing' || code === 'scoria_rain') {
+      avatar.body.position.y = 0.55 * phase;
+      avatar.leftArm.rotation.x = -2.2 * phase;
+      avatar.rightArm.rotation.x = -2.2 * phase;
+      avatar.leftArm.rotation.z = 0.5 * phase;
+      avatar.rightArm.rotation.z = -0.5 * phase;
+    } else if (code === 'faham_infusion' || code === 'salazie_mist') {
+      avatar.leftArm.rotation.x = -1.35 * phase;
+      avatar.rightArm.rotation.x = -1.35 * phase;
+      avatar.body.position.y = 0.2 * phase;
+    } else {
+      avatar.rightArm.rotation.x = -1.75 * phase;
+      avatar.leftArm.rotation.x = -0.75 * phase;
+      avatar.body.position.z = 0.4 * phase;
+    }
+
+    if (avatar.attackTimer <= 0) {
+      avatar.activeSkillCode = null;
+    }
   }
 }
 
