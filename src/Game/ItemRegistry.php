@@ -330,30 +330,86 @@ final class ItemRegistry
             new ItemDefinition(
                 code: 'tranchant_dolomieu',
                 name: 'Tranchant du Dolomieu',
-                description: 'Arme légendaire imprégnée de la rage du Seigneur du Dolomieu.',
+                description: 'Lame légendaire imprégnée de la rage du Seigneur du Dolomieu (World Boss).',
                 type: ItemDefinition::TYPE_EQUIPMENT,
                 slot: ItemDefinition::SLOT_WEAPON,
                 rarity: ItemDefinition::RARITY_LEGENDARY,
-                minLevel: 9,
+                minLevel: 8,
                 icon: '🌋',
                 sellPrice: 240,
                 buyPrice: 0,
                 stackable: false,
-                bonuses: ['strength' => 16, 'intelligence' => 14, 'vitality' => 10, 'defense' => 6],
+                bonuses: ['strength' => 18, 'intelligence' => 14, 'vitality' => 10, 'defense' => 6],
             ),
             new ItemDefinition(
                 code: 'coeur_magma',
                 name: 'Cœur du Volcan',
-                description: 'Talisman légendaire battant au rythme du Piton de la Fournaise.',
+                description: 'Talisman légendaire battant au rythme du Piton de la Fournaise (World Boss).',
                 type: ItemDefinition::TYPE_EQUIPMENT,
                 slot: ItemDefinition::SLOT_ACCESSORY,
                 rarity: ItemDefinition::RARITY_LEGENDARY,
-                minLevel: 9,
+                minLevel: 8,
                 icon: '❤️‍🔥',
                 sellPrice: 220,
                 buyPrice: 0,
                 stackable: false,
-                bonuses: ['vitality' => 14, 'strength' => 10, 'intelligence' => 10, 'defense' => 10, 'spirit' => 10],
+                bonuses: ['vitality' => 14, 'strength' => 11, 'intelligence' => 11, 'defense' => 11, 'spirit' => 11],
+            ),
+            new ItemDefinition(
+                code: 'egide_fournaise',
+                name: 'Égide de la Fournaise',
+                description: 'Armure lourde légendaire forgée dans les plaques du Seigneur du Dolomieu (World Boss).',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_ARMOR,
+                rarity: ItemDefinition::RARITY_LEGENDARY,
+                minLevel: 8,
+                icon: '🛡️',
+                sellPrice: 250,
+                buyPrice: 0,
+                stackable: false,
+                bonuses: ['vitality' => 18, 'defense' => 18, 'strength' => 9, 'spirit' => 7],
+            ),
+            new ItemDefinition(
+                code: 'marteau_basalte',
+                name: 'Brise-Cratère de Basalte',
+                description: 'Marteau titanesque légendaire capable d\'encaisser la fureur du volcan (World Boss).',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_WEAPON,
+                rarity: ItemDefinition::RARITY_LEGENDARY,
+                minLevel: 8,
+                icon: '🔨',
+                sellPrice: 245,
+                buyPrice: 0,
+                stackable: false,
+                bonuses: ['vitality' => 16, 'defense' => 14, 'strength' => 16, 'spirit' => 6],
+            ),
+            new ItemDefinition(
+                code: 'sceptre_piton',
+                name: 'Sceptre de l\'Aube Volcanique',
+                description: 'Bâton légendaire canalisant la lumière pure au-dessus de la Fournaise (World Boss).',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_WEAPON,
+                rarity: ItemDefinition::RARITY_LEGENDARY,
+                minLevel: 8,
+                icon: '🌟',
+                sellPrice: 245,
+                buyPrice: 0,
+                stackable: false,
+                bonuses: ['intelligence' => 19, 'spirit' => 17, 'vitality' => 11, 'defense' => 6],
+            ),
+            new ItemDefinition(
+                code: 'couronne_dolomieu',
+                name: 'Couronne du Dolomieu',
+                description: 'Diadème de braise éternelle arraché au front du Seigneur du Dolomieu (World Boss).',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_HELM,
+                rarity: ItemDefinition::RARITY_LEGENDARY,
+                minLevel: 8,
+                icon: '👑',
+                sellPrice: 240,
+                buyPrice: 0,
+                stackable: false,
+                bonuses: ['vitality' => 14, 'intelligence' => 15, 'strength' => 12, 'defense' => 10, 'spirit' => 12],
             ),
         ];
 
@@ -468,15 +524,30 @@ final class ItemRegistry
                 ['couronne_cimes', 0.18, 1, 1],
             ],
             'seigneur_dolomieu' => [
-                ['cendre_dolomieu', 1.0, 3, 5],
+                ['cendre_dolomieu', 1.0, 2, 4],
                 ['elixir_volcan', 1.0, 2, 3],
-                ['tranchant_dolomieu', 0.85, 1, 1],
-                ['coeur_magma', 0.85, 1, 1],
+                ['tranchant_dolomieu', 1.0, 1, 1],
+                ['coeur_magma', 0.50, 1, 1],
             ],
             default => [
                 ['pince_crabe', 0.75, 1, 1],
                 ['tisane_soin', 0.25, 1, 1],
             ],
         };
+    }
+
+    /**
+     * Returns a 100% guaranteed World Boss LEGENDARY item code with smart class affinity
+     * so Tanks, DPS, and Healers all receive exciting endgame gear when defeating a World Boss.
+     */
+    public function guaranteedLegendaryForWorldBoss(CharacterClass $class): string
+    {
+        $pool = match ($class) {
+            CharacterClass::TANK => ['egide_fournaise', 'marteau_basalte', 'coeur_magma', 'couronne_dolomieu'],
+            CharacterClass::DPS => ['tranchant_dolomieu', 'coeur_magma', 'couronne_dolomieu', 'egide_fournaise'],
+            CharacterClass::HEAL => ['sceptre_piton', 'couronne_dolomieu', 'coeur_magma', 'egide_fournaise'],
+        };
+
+        return $pool[mt_rand(0, count($pool) - 1)];
     }
 }

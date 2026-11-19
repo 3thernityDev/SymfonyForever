@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service\Game;
 
 use App\Entity\Character;
+use App\Entity\ChatMessage;
 use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Game\SkillDefinition;
@@ -194,12 +195,18 @@ final class CombatService
     public function handleMonsterDeath(MonsterInstance $monster, ?Character $killer, float $now, array &$createdEvents): array
     {
         $template = $monster->getTemplate();
+        $isWorldBoss = $template->isWorldBoss();
+        $contributorIds = $monster->getRaidContributorIds();
+
         $monster->setCurrentHp(0);
         $monster->setState(MonsterInstance::STATE_DEAD);
         $monster->setThreatTable([]);
+        $monster->setRaidContributors([]);
         $monster->setActiveEffects([]);
         $monster->setTauntedByCharacterId(null);
         $monster->setTauntExpiresAt(0.0);
+        $monster->setPhase(1);
+        $monster->setLastSpecialAt(0.0);
         $monster->setRespawnAt($now + $template->getRespawnSeconds());
 
         $killEvent = new CombatEvent(
@@ -222,7 +229,86 @@ final class CombatService
         $this->em->persist($killEvent);
         $createdEvents[] = $killEvent;
 
-        // Spawn a 3D loot chest/bag on the ground for the killer / party!
+        // WORLD BOSS: Reward EVERY participating player across the entire alliance with a
+        // 100% GUARANTEED personal Legendary chest, full Raid XP, Quest credit & Global announcement!
+        if ($isWorldBoss) {
+            $participantsById = [];
+            foreach ($contributorIds as $cid) {
+                $ch = $this->characterRepository->find($cid);
+                if ($ch instanceof Character) {
+                    $participantsById[(int) $ch->getId()] = $ch;
+                }
+            }
+            if ($killer !== null) {
+                $participantsById[(int) $killer->getId()] = $killer;
+                $party = $killer->getParty();
+                if ($party !== null) {
+                    foreach ($party->getMembers() as $member) {
+                        if ($member->getZoneCode() === $monster->getZoneCode()) {
+                            $participantsById[(int) $member->getId()] = $member;
+                        }
+                    }
+                }
+            }
+
+            $participants = array_values($participantsById);
+            if ($participants !== []) {
+                $this->inventoryService->spawnWorldBossLootForParticipants($monster, $participants, $now);
+
+                $names = array_map(static fn (Character $c): string => $c->getName(), array_slice($participants, 0, 10));
+                $heroList = implode(', ', $names).(count($participants) > 10 ? '…' : '');
+                $msg = new ChatMessage(
+                    ChatMessage::CHANNEL_SYSTEM,
+                    'Île de La Réunion',
+                    '',
+                    sprintf(
+                        '🏆 [WORLD BOSS] %s est tombé grâce à %d héros (%s) ! Chacun reçoit un coffre LÉGENDAIRE garanti !',
+                        $template->getName(),
+                        count($participants),
+                        $heroList,
+                    ),
+                );
+                $this->em->persist($msg);
+            }
+
+            $killerXp = 0;
+            $killerLeveledUp = false;
+            $raidXp = $template->getXpReward();
+
+            foreach ($participants as $member) {
+                $this->questService->onMonsterKilled($member, $template);
+                $result = $this->levelingService->grantXp($member, $raidXp);
+                if ($killer !== null && $member->getId() === $killer->getId()) {
+                    $killerXp = $raidXp;
+                    $killerLeveledUp = $result['leveledUp'];
+                }
+                if ($result['leveledUp']) {
+                    $lvlEv = new CombatEvent(
+                        $member->getZoneCode(),
+                        'LEVEL_UP',
+                        'PLAYER',
+                        (int) $member->getId(),
+                        $member->getName(),
+                        'PLAYER',
+                        (int) $member->getId(),
+                        $member->getName(),
+                        'level_up',
+                        $result['newLevel'],
+                        false,
+                        $member->getPosX(),
+                        $member->getPosY(),
+                        $member->getPosZ(),
+                        $now,
+                    );
+                    $this->em->persist($lvlEv);
+                    $createdEvents[] = $lvlEv;
+                }
+            }
+
+            return [$killerXp, $killerLeveledUp];
+        }
+
+        // Standard monster / elite: spawn shared ground loot chest for the killer / party
         $this->inventoryService->spawnLootForMonster($monster, $killer, $now);
 
         if ($killer === null) {
@@ -326,6 +412,7 @@ final class CombatService
             $damage *= 1.65;
         }
 
+        $wasIdle = $monster->getState() === MonsterInstance::STATE_IDLE;
         $finalDamage = max(1, (int) round($damage));
         $monster->setCurrentHp($monster->getCurrentHp() - $finalDamage);
         $monster->setState(MonsterInstance::STATE_COMBAT);
@@ -333,6 +420,23 @@ final class CombatService
         // Threat calculation (Tank passive x2.2 * skill threat multiplier)
         $threatGain = $finalDamage * $caster->getCharacterClass()->threatMultiplier() * $skill->threatMultiplier;
         $monster->addThreat((int) $caster->getId(), $threatGain);
+
+        if ($monster->getTemplate()->isWorldBoss()) {
+            $monster->addRaidContribution((int) $caster->getId(), $finalDamage + ($skill->effectType === 'TAUNT' ? 50.0 : 0.0));
+            if ($wasIdle) {
+                $pullMsg = new ChatMessage(
+                    ChatMessage::CHANNEL_SYSTEM,
+                    'Île de La Réunion',
+                    '',
+                    sprintf(
+                        '🌋 [WORLD BOSS] %s a engagé %s au Cratère Dolomieu ! Alliez-vous jusqu\'à 10 joueurs pour un objet LÉGENDAIRE garanti !',
+                        $caster->getName(),
+                        $monster->getTemplate()->getName(),
+                    ),
+                );
+                $this->em->persist($pullMsg);
+            }
+        }
 
         // Handle Taunt override
         if ($skill->effectType === 'TAUNT') {
@@ -455,11 +559,17 @@ final class CombatService
         }
 
         // Healing generates moderate threat on nearby monsters currently engaged against the healed ally
-        if ($effectiveHeal > 0) {
+        // and registers the healer as a World Boss raid participant for guaranteed Legendary loot!
+        if ($effectiveHeal > 0 || $amount > 0) {
             $engaged = $this->monsterRepository->findAliveInRadius($ally->getPosX(), $ally->getPosZ(), 45.0);
             foreach ($engaged as $m) {
                 if ($m->getState() === MonsterInstance::STATE_COMBAT) {
-                    $m->addThreat((int) $caster->getId(), $effectiveHeal * $skill->threatMultiplier * $caster->getCharacterClass()->threatMultiplier());
+                    if ($effectiveHeal > 0) {
+                        $m->addThreat((int) $caster->getId(), $effectiveHeal * $skill->threatMultiplier * $caster->getCharacterClass()->threatMultiplier());
+                    }
+                    if ($m->getTemplate()->isWorldBoss()) {
+                        $m->addRaidContribution((int) $caster->getId(), max(15.0, (float) $amount));
+                    }
                 }
             }
         }
@@ -541,19 +651,46 @@ final class CombatService
      */
     private function resolvePartyTargetsInRadius(Character $caster, float $radius): array
     {
-        $party = $caster->getParty();
-        if ($party === null) {
-            return [$caster];
-        }
+        $targetsById = [(int) $caster->getId() => $caster];
 
-        $targets = [];
-        foreach ($party->getMembers() as $member) {
-            if ($this->distance2D($caster->getPosX(), $caster->getPosZ(), $member->getPosX(), $member->getPosZ()) <= $radius) {
-                $targets[] = $member;
+        $party = $caster->getParty();
+        if ($party !== null) {
+            foreach ($party->getMembers() as $member) {
+                if ($this->distance2D($caster->getPosX(), $caster->getPosZ(), $member->getPosX(), $member->getPosZ()) <= $radius) {
+                    $targetsById[(int) $member->getId()] = $member;
+                }
             }
         }
 
-        return $targets !== [] ? $targets : [$caster];
+        // During an open-world World Boss raid, allow Bénédiction du Lagon to heal nearby allied fighters too (up to 10!)
+        $nearbyMonsters = $this->monsterRepository->findAliveInRadius($caster->getPosX(), $caster->getPosZ(), 45.0);
+        $nearWorldBoss = false;
+        foreach ($nearbyMonsters as $m) {
+            if ($m->getTemplate()->isWorldBoss() && $m->getState() === MonsterInstance::STATE_COMBAT) {
+                $nearWorldBoss = true;
+                break;
+            }
+        }
+
+        if ($nearWorldBoss && count($targetsById) < 10) {
+            $allies = $this->characterRepository->findOnlineNearby(
+                $caster->getPosX(),
+                $caster->getPosZ(),
+                $radius,
+                microtime(true),
+                $caster->getId(),
+            );
+            foreach ($allies as $ally) {
+                if (!$ally->isDead()) {
+                    $targetsById[(int) $ally->getId()] = $ally;
+                    if (count($targetsById) >= 10) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return array_values($targetsById);
     }
 
     private function distance2D(float $x1, float $z1, float $x2, float $z2): float

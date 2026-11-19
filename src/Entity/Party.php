@@ -13,7 +13,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Table(name: 'game_party')]
 class Party
 {
-    public const int MAX_MEMBERS = 5;
+    public const int MAX_MEMBERS = 10;
 
     #[ORM\Id]
     #[ORM\GeneratedValue]

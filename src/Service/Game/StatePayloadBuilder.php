@@ -130,6 +130,9 @@ final class StatePayloadBuilder
             }
         }
 
+        $activeEngaged = count($m->getThreatTable());
+        $isWorldBoss = $tpl->isWorldBoss();
+
         return [
             'id' => $m->getId(),
             'code' => $tpl->getCode(),
@@ -147,9 +150,44 @@ final class StatePayloadBuilder
             'primaryColor' => $tpl->getPrimaryColor(),
             'scale' => $tpl->getScale(),
             'isBoss' => $tpl->isBoss(),
+            'isWorldBoss' => $isWorldBoss,
+            'phase' => $m->getPhase(),
+            'participantCount' => $isWorldBoss ? max($activeEngaged, $m->getRaidContributorCount()) : $activeEngaged,
+            'carapaceActive' => $isWorldBoss && $activeEngaged < WorldSimulationService::WORLD_BOSS_MIN_PLAYERS_NO_REGEN,
+            'respawnRemaining' => $m->getState() === MonsterInstance::STATE_DEAD ? round(max(0.0, $m->getRespawnAt() - $now), 1) : 0.0,
             'aggressive' => $tpl->isAggressive(),
             'targetCharacterId' => $m->getTopThreatCharacterId($now),
             'effects' => $effects,
+        ];
+    }
+
+    /**
+     * Global World Boss live status summary broadcast to every player across La Réunion.
+     *
+     * @return array<string, mixed>
+     */
+    public function buildWorldBossSummary(MonsterInstance $m, float $now): array
+    {
+        $tpl = $m->getTemplate();
+        $activeEngaged = count($m->getThreatTable());
+
+        return [
+            'id' => $m->getId(),
+            'code' => $tpl->getCode(),
+            'name' => $tpl->getName(),
+            'level' => $tpl->getLevel(),
+            'zoneCode' => $m->getZoneCode(),
+            'x' => round($m->getPosX(), 1),
+            'z' => round($m->getPosZ(), 1),
+            'hp' => $m->getCurrentHp(),
+            'maxHp' => $tpl->getMaxHp(),
+            'state' => $m->getState(),
+            'phase' => $m->getPhase(),
+            'activeEngaged' => $activeEngaged,
+            'participantCount' => max($activeEngaged, $m->getRaidContributorCount()),
+            'carapaceActive' => $activeEngaged < WorldSimulationService::WORLD_BOSS_MIN_PLAYERS_NO_REGEN,
+            'recommendedPlayers' => 10,
+            'respawnRemaining' => $m->getState() === MonsterInstance::STATE_DEAD ? round(max(0.0, $m->getRespawnAt() - $now), 1) : 0.0,
         ];
     }
 

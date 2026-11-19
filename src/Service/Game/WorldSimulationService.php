@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service\Game;
 
 use App\Entity\Character;
+use App\Entity\ChatMessage;
 use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Entity\Zone;
@@ -24,6 +25,11 @@ final class WorldSimulationService
 {
     public const float TICK_INTERVAL = 1.0;
     public const float LEASH_DISTANCE = 52.0;
+    public const float WORLD_BOSS_LEASH_DISTANCE = 78.0;
+    public const int WORLD_BOSS_MIN_PLAYERS_NO_REGEN = 3;
+    public const float WORLD_BOSS_AOE_RADIUS = 26.0;
+    public const float WORLD_BOSS_AOE_COOLDOWN_P1 = 7.0;
+    public const float WORLD_BOSS_AOE_COOLDOWN_P2 = 5.5;
 
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -174,7 +180,23 @@ final class WorldSimulationService
                 $monster->setPosY($monster->getSpawnY());
                 $monster->setPosZ($monster->getSpawnZ());
                 $monster->setThreatTable([]);
+                $monster->setRaidContributors([]);
                 $monster->setActiveEffects([]);
+                $monster->setPhase(1);
+                $monster->setLastSpecialAt(0.0);
+
+                if ($template->isWorldBoss()) {
+                    $respawnMsg = new ChatMessage(
+                        ChatMessage::CHANNEL_SYSTEM,
+                        'Île de La Réunion',
+                        '',
+                        sprintf(
+                            '🌋 [WORLD BOSS] La terre tremble ! %s s\'éveille au Cratère Dolomieu (Piton de la Fournaise). Alliez-vous jusqu\'à 10 joueurs !',
+                            $template->getName(),
+                        ),
+                    );
+                    $this->em->persist($respawnMsg);
+                }
             }
 
             return;
@@ -232,6 +254,9 @@ final class WorldSimulationService
                 $monster->setCurrentHp($template->getMaxHp());
                 $monster->setState(MonsterInstance::STATE_IDLE);
                 $monster->setThreatTable([]);
+                $monster->setRaidContributors([]);
+                $monster->setPhase(1);
+                $monster->setLastSpecialAt(0.0);
             } else {
                 $this->moveTowards($monster, $monster->getSpawnX(), $monster->getSpawnZ(), $template->getMoveSpeed() * 1.4 * $step);
                 $monster->setCurrentHp(min($template->getMaxHp(), $monster->getCurrentHp() + (int) round($template->getMaxHp() * 0.2)));
@@ -277,6 +302,20 @@ final class WorldSimulationService
                 if ($closest !== null) {
                     $monster->addThreat((int) $closest->getId(), 15.0);
                     $monster->setState(MonsterInstance::STATE_COMBAT);
+                    if ($template->isWorldBoss()) {
+                        $monster->addRaidContribution((int) $closest->getId(), 10.0);
+                        $pullMsg = new ChatMessage(
+                            ChatMessage::CHANNEL_SYSTEM,
+                            'Île de La Réunion',
+                            '',
+                            sprintf(
+                                '🌋 [WORLD BOSS] %s a réveillé %s au Cratère Dolomieu ! Rassemblez jusqu\'à 10 aventuriers !',
+                                $closest->getName(),
+                                $template->getName(),
+                            ),
+                        );
+                        $this->em->persist($pullMsg);
+                    }
                 }
             }
 
@@ -300,15 +339,54 @@ final class WorldSimulationService
 
         // COMBAT state
         $distFromSpawn = hypot($monster->getPosX() - $monster->getSpawnX(), $monster->getPosZ() - $monster->getSpawnZ());
+        $leash = $template->isWorldBoss() ? self::WORLD_BOSS_LEASH_DISTANCE : self::LEASH_DISTANCE;
         $targetId = $monster->getTopThreatCharacterId($now);
         $target = ($targetId !== null && isset($playersById[$targetId])) ? $playersById[$targetId] : null;
 
-        if ($target === null || $target->isDead() || $distFromSpawn > self::LEASH_DISTANCE) {
+        if ($target === null || $target->isDead() || $distFromSpawn > $leash) {
             $monster->setState(MonsterInstance::STATE_RETURNING);
             $monster->setThreatTable([]);
+            $monster->setRaidContributors([]);
             $monster->setTauntedByCharacterId(null);
+            $monster->setPhase(1);
+            $monster->setLastSpecialAt(0.0);
 
             return;
+        }
+
+        // WORLD BOSS SPECIAL MECHANICS: Anti-solo Carapace Magmatique, Phase 2 Fureur & Raid AoE Eruption!
+        if ($template->isWorldBoss()) {
+            $hpRatio = $monster->getCurrentHp() / max(1, $template->getMaxHp());
+
+            // Phase 2 transition (< 50% HP)
+            if ($hpRatio <= 0.50 && $monster->getPhase() < 2) {
+                $monster->setPhase(2);
+                $p2Msg = new ChatMessage(
+                    ChatMessage::CHANNEL_SYSTEM,
+                    'Île de La Réunion',
+                    '',
+                    sprintf(
+                        '🔥 [WORLD BOSS] %s entre en Fureur Magmatique (Phase 2 — 50%% PV) ! Ses attaques et éruptions s\'intensifient !',
+                        $template->getName(),
+                    ),
+                );
+                $this->em->persist($p2Msg);
+            }
+
+            // Anti-solo Carapace Magmatique: < 3 active engaged players => regenerates 2% Max HP / sec (~560 HP/s)
+            $activeEngaged = count($pruned);
+            if ($activeEngaged < self::WORLD_BOSS_MIN_PLAYERS_NO_REGEN) {
+                $regen = (int) ceil($template->getMaxHp() * 0.02 * $step);
+                $monster->setCurrentHp(min($template->getMaxHp(), $monster->getCurrentHp() + $regen));
+            }
+
+            // Periodic Raid AoE: Éruption du Dolomieu (every 7.0s in P1, 5.5s in P2)
+            $aoeCd = $monster->getPhase() >= 2 ? self::WORLD_BOSS_AOE_COOLDOWN_P2 : self::WORLD_BOSS_AOE_COOLDOWN_P1;
+            if ($monster->getLastSpecialAt() <= 0.0) {
+                $monster->setLastSpecialAt($now - ($aoeCd - 4.0));
+            } elseif (($now - $monster->getLastSpecialAt()) >= $aoeCd) {
+                $this->performWorldBossEruption($monster, $playersById, $now, $createdEvents);
+            }
         }
 
         $distTarget = hypot($target->getPosX() - $monster->getPosX(), $target->getPosZ() - $monster->getPosZ());
@@ -319,6 +397,86 @@ final class WorldSimulationService
             $monster->setRotY(atan2($target->getPosX() - $monster->getPosX(), $target->getPosZ() - $monster->getPosZ()));
             if (($now - $monster->getLastAttackAt()) >= $template->getAttackInterval()) {
                 $this->performMonsterAttack($monster, $target, $now, $createdEvents);
+            }
+        }
+    }
+
+    /**
+     * World Boss periodic raid-wide volcanic shockwave hitting all alive players within 26m.
+     *
+     * @param array<int, Character> $playersById
+     * @param list<CombatEvent>     $createdEvents
+     */
+    private function performWorldBossEruption(
+        MonsterInstance $monster,
+        array $playersById,
+        float $now,
+        array &$createdEvents,
+    ): void {
+        $template = $monster->getTemplate();
+        $monster->setLastSpecialAt($now);
+        $rawBase = $monster->getPhase() >= 2 ? 175.0 : 135.0;
+
+        foreach ($playersById as $player) {
+            if ($player->isDead()) {
+                continue;
+            }
+            $dist = hypot($player->getPosX() - $monster->getPosX(), $player->getPosZ() - $monster->getPosZ());
+            if ($dist > self::WORLD_BOSS_AOE_RADIUS) {
+                continue;
+            }
+
+            $stats = $this->statCalculator->compute($player, $now);
+            $variance = 0.90 + (mt_rand(0, 200) / 1000.0);
+            $dmg = max(1, (int) round($rawBase * $variance * (1.0 - (float) $stats['damageReduction'])));
+
+            $player->setCurrentHp($player->getCurrentHp() - $dmg);
+            $player->setLastCombatAt($now);
+
+            $ev = new CombatEvent(
+                $monster->getZoneCode(),
+                'DAMAGE',
+                'MONSTER',
+                (int) $monster->getId(),
+                $template->getName(),
+                'PLAYER',
+                (int) $player->getId(),
+                $player->getName(),
+                'boss_eruption',
+                $dmg,
+                $monster->getPhase() >= 2,
+                $player->getPosX(),
+                $player->getPosY(),
+                $player->getPosZ(),
+                $now,
+            );
+            $this->em->persist($ev);
+            $createdEvents[] = $ev;
+
+            if ($player->getCurrentHp() <= 0) {
+                $player->setCurrentHp(0);
+                $player->setIsDead(true);
+                $player->setActiveEffects([]);
+
+                $deathEv = new CombatEvent(
+                    $player->getZoneCode(),
+                    'DEATH',
+                    'MONSTER',
+                    (int) $monster->getId(),
+                    $template->getName(),
+                    'PLAYER',
+                    (int) $player->getId(),
+                    $player->getName(),
+                    'death',
+                    0,
+                    false,
+                    $player->getPosX(),
+                    $player->getPosY(),
+                    $player->getPosZ(),
+                    $now,
+                );
+                $this->em->persist($deathEv);
+                $createdEvents[] = $deathEv;
             }
         }
     }
@@ -336,7 +494,8 @@ final class WorldSimulationService
         $stats = $this->statCalculator->compute($target, $now);
 
         $variance = 0.88 + (mt_rand(0, 240) / 1000.0);
-        $raw = $template->getAttack() * $variance;
+        $phaseMult = ($template->isWorldBoss() && $monster->getPhase() >= 2) ? 1.20 : 1.0;
+        $raw = $template->getAttack() * $phaseMult * $variance;
         $mitigated = $raw * (1.0 - (float) $stats['damageReduction']);
         $dmg = max(1, (int) round($mitigated));
 

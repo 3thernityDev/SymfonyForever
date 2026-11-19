@@ -118,12 +118,20 @@ final class WorldSyncController extends AbstractController
             self::INTEREST_RADIUS,
         );
 
-        $nearbyLoot = $lootRepository->findActiveNearby(
-            $character->getPosX(),
-            $character->getPosZ(),
-            self::INTEREST_RADIUS,
-            $now,
-        );
+        $nearbyLoot = array_values(array_filter(
+            $lootRepository->findActiveNearby(
+                $character->getPosX(),
+                $character->getPosZ(),
+                self::INTEREST_RADIUS,
+                $now,
+            ),
+            static fn ($drop): bool => !$drop->isPersonalChest() || $drop->canBeLootedBy($character, $now),
+        ));
+
+        $worldBosses = $monsterRepository->findWorldBosses();
+        $worldBossSummary = $worldBosses !== []
+            ? $payloadBuilder->buildWorldBossSummary($worldBosses[0], $now)
+            : null;
 
         $lastEventId = (int) ($data['lastEventId'] ?? 0);
         $lastChatId = (int) ($data['lastChatId'] ?? 0);
@@ -162,6 +170,7 @@ final class WorldSyncController extends AbstractController
                 static fn ($drop): array => $drop->toArray($character, $now),
                 $nearbyLoot,
             ),
+            'worldBoss' => $worldBossSummary,
             'pendingInvite' => $character->getPendingPartyInviteId() !== null ? [
                 'partyId' => $character->getPendingPartyInviteId(),
                 'label' => $pendingInvitePartyName,

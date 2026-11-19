@@ -94,6 +94,57 @@ final class InventoryService
     }
 
     /**
+     * Spawns one personal 100% GUARANTEED LEGENDARY loot chest for EVERY player who
+     * participated in defeating a World Boss (even across multiple parties / solo allies!).
+     *
+     * @param list<Character> $participants
+     * @return list<WorldLootDrop>
+     */
+    public function spawnWorldBossLootForParticipants(MonsterInstance $monster, array $participants, float $now): array
+    {
+        $tpl = $monster->getTemplate();
+        $drops = [];
+        $count = max(1, count($participants));
+
+        foreach ($participants as $idx => $participant) {
+            $legendaryCode = $this->itemRegistry->guaranteedLegendaryForWorldBoss($participant->getCharacterClass());
+            $droppedItems = [
+                ['itemCode' => $legendaryCode, 'quantity' => 1],
+                ['itemCode' => 'cendre_dolomieu', 'quantity' => 2],
+                ['itemCode' => 'elixir_volcan', 'quantity' => 2],
+            ];
+            $gold = mt_rand(180, 260);
+
+            // Arrange personal chests neatly around the fallen boss corpse on walkable ground
+            $angle = ($idx / $count) * M_PI * 2.0;
+            $radius = $count === 1 ? 1.5 : 4.2;
+            $cx = $monster->getPosX() + cos($angle) * $radius;
+            $cz = $monster->getPosZ() + sin($angle) * $radius;
+            $cy = $this->terrainService->getHeight($cx, $cz);
+
+            $drop = new WorldLootDrop(
+                $monster->getZoneCode(),
+                sprintf('Butin Légendaire (%s) — %s', $participant->getName(), $tpl->getName()),
+                $cx,
+                $cy,
+                $cz,
+                $gold,
+                $droppedItems,
+                ItemDefinition::RARITY_LEGENDARY,
+                $participant->getId(),
+                null, // strictly personal chest so every allied raider gets their own guaranteed Legendary!
+                $now,
+                240.0,
+                300.0,
+            );
+            $this->em->persist($drop);
+            $drops[] = $drop;
+        }
+
+        return $drops;
+    }
+
+    /**
      * Grants starter consumables to newly created characters.
      */
     public function grantStarterItems(Character $character): void

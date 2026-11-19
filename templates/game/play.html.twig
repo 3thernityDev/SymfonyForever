@@ -52,10 +52,48 @@
     .mini-btn:hover { background: rgba(56,189,248,0.38); }
     .mini-btn-red { background: rgba(239,68,68,0.22); color: #fecaca; }
 
-    /* Top-center: Target Frame */
+    /* Top-center: Target Frame & World Boss Raid Bar */
     .hud-target { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); width: 310px; display: none; }
     .hud-target.visible { display: block; }
     .aggro-tag { font-size: 11px; color: #fdba74; margin-top: 2px; }
+
+    #world-boss-hud {
+        position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
+        width: 460px; max-width: calc(100vw - 560px); min-width: 320px;
+        padding: 10px 14px; display: none; z-index: 25;
+        background: linear-gradient(180deg, rgba(40, 10, 12, 0.92), rgba(14, 16, 26, 0.92));
+        border: 1px solid rgba(249, 115, 22, 0.72);
+        box-shadow: 0 0 28px rgba(220, 38, 38, 0.45), 0 12px 28px rgba(0, 0, 0, 0.6);
+    }
+    #world-boss-hud.visible { display: block; }
+    .wb-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .wb-title { font-weight: 800; font-size: 13px; color: #fef08a; letter-spacing: 0.03em; display: flex; align-items: center; gap: 6px; }
+    .wb-badge {
+        font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px;
+        background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(248, 113, 113, 0.7); color: #fecaca;
+        text-transform: uppercase;
+    }
+    .wb-badge.phase2 { background: rgba(249, 115, 22, 0.35); border-color: #facc15; color: #fef08a; animation: pulseGold 1.2s infinite; }
+    .wb-bar { position: relative; height: 18px; background: rgba(0, 0, 0, 0.68); border-radius: 8px; overflow: hidden; border: 1px solid rgba(251, 146, 60, 0.45); }
+    .wb-bar-fill { height: 100%; background: linear-gradient(90deg, #991b1b, #ef4444, #f97316); transition: width 0.25s ease; }
+    .wb-bar-notch { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: rgba(254, 240, 138, 0.7); pointer-events: none; }
+    .wb-meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; font-size: 11px; color: #fed7aa; }
+    .wb-pill {
+        padding: 2px 7px; border-radius: 999px; font-size: 10px; font-weight: 700;
+        background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.16);
+    }
+    .wb-pill.warn { background: rgba(239, 68, 68, 0.25); border-color: rgba(248, 113, 113, 0.65); color: #fecaca; }
+    .wb-pill.ok { background: rgba(16, 185, 129, 0.22); border-color: rgba(52, 211, 153, 0.6); color: #a7f3d0; }
+    .wb-pill.leg { background: rgba(249, 115, 22, 0.22); border-color: rgba(251, 146, 60, 0.7); color: #fdba74; }
+
+    #wb-minimap-pill {
+        font-size: 11px; padding: 5px 8px; border-radius: 8px; cursor: pointer;
+        background: rgba(220, 38, 38, 0.16); border: 1px solid rgba(249, 115, 22, 0.5);
+        color: #fed7aa; display: flex; justify-content: space-between; align-items: center; gap: 6px;
+        transition: background 0.15s ease;
+    }
+    #wb-minimap-pill:hover { background: rgba(220, 38, 38, 0.3); }
+    #wb-minimap-pill.dead { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.3); color: #94a3b8; }
 
     /* Top-right: Minimap, Zone & Quest Tracker */
     .hud-top-right-col { position: absolute; top: 14px; right: 14px; width: 230px; display: flex; flex-direction: column; gap: 8px; }
@@ -324,7 +362,7 @@
 
         <div class="hud-box party-box">
             <div class="party-head">
-                <span>Groupe (Tank · DPS · Heal)</span>
+                <span>Groupe / Raid (max 10)</span>
                 <button class="mini-btn mini-btn-red" id="btn-party-leave" style="display:none;">Quitter</button>
             </div>
             <div id="party-invite-banner" style="display:none; margin-bottom:6px; padding:6px; border-radius:8px; background:rgba(20,184,166,0.18); border:1px solid #2dd4bf;">
@@ -334,7 +372,7 @@
                     <button class="mini-btn mini-btn-red" id="btn-party-decline">Refuser</button>
                 </div>
             </div>
-            <div id="party-members"><div style="color:var(--text-muted); font-size:11px;">En solo — invitez un joueur pour partager l'XP (+10%/allié) et affronter le Dolomieu.</div></div>
+            <div id="party-members"><div style="color:var(--text-muted); font-size:11px;">En solo — alliez-vous jusqu'à 10 joueurs pour vaincre le World Boss et gagner un LÉGENDAIRE garanti !</div></div>
             <form class="party-invite-row" id="party-invite-form">
                 <input type="text" id="party-invite-input" placeholder="Inviter un joueur...">
                 <button type="submit" class="mini-btn">+ Inviter</button>
@@ -342,7 +380,7 @@
         </div>
     </div>
 
-    <!-- Top Center: Target -->
+    <!-- Top Center: Target & World Boss Raid Bar -->
     <div class="hud-box unit-frame hud-target" id="target-frame">
         <div class="unit-head">
             <div class="unit-name" id="target-name">Cible</div>
@@ -350,6 +388,23 @@
         </div>
         <div class="bar bar-hp-enemy" id="target-hp-bar"><div class="bar-fill" id="target-hp-fill" style="width:100%"></div><div class="bar-label" id="target-hp-text">--</div></div>
         <div class="aggro-tag" id="target-aggro"></div>
+    </div>
+
+    <div class="hud-box" id="world-boss-hud">
+        <div class="wb-head">
+            <div class="wb-title">🌋 <span id="wb-name">Seigneur du Dolomieu (World Boss)</span></div>
+            <span class="wb-badge" id="wb-phase-badge">RAID 10 JOUEURS</span>
+        </div>
+        <div class="wb-bar">
+            <div class="wb-bar-fill" id="wb-hp-fill" style="width:100%"></div>
+            <div class="wb-bar-notch" title="Seuil Phase 2 : Fureur Magmatique (50%)"></div>
+            <div class="bar-label" id="wb-hp-text">28 000 / 28 000 (100%)</div>
+        </div>
+        <div class="wb-meta">
+            <span class="wb-pill" id="wb-allies">👥 0 / 10 Alliés</span>
+            <span class="wb-pill warn" id="wb-carapace">🛡️ Carapace : 3+ joueurs requis</span>
+            <span class="wb-pill leg">🏆 1× LÉGENDAIRE garanti</span>
+        </div>
     </div>
 
     <!-- Top Right: Minimap & Quest Tracker -->
@@ -363,6 +418,10 @@
                 <a href="{{ path('app_characters') }}" class="mini-btn" title="Retour au Lobby">Lobby</a>
             </div>
             <canvas id="minimap-canvas" width="208" height="208"></canvas>
+            <div id="wb-minimap-pill" title="Cliquer pour préparer le voyage vers le Piton de la Fournaise (World Boss 10 joueurs · 1× Légendaire garanti)">
+                <span>🌋 Dolomieu</span>
+                <strong id="wb-minimap-status">Actif</strong>
+            </div>
             <div class="travel-row">
                 <select id="travel-select" title="Relais des Cirques (Voyage rapide hors combat)"></select>
                 <button type="button" class="mini-btn" id="btn-travel">Voyager</button>

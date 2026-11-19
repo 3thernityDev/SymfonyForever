@@ -192,8 +192,8 @@ final class QuestRegistry
             new QuestDefinition(
                 code: 'q10_seigneur_dolomieu',
                 order: 10,
-                title: 'Le Cœur du Dolomieu',
-                description: 'Le Seigneur du Dolomieu (World Boss) menace de plonger toute La Réunion sous la lave ! Forme un groupe Tank + DPS + Heal et terrasse-le au cœur du cratère.',
+                title: 'Le Cœur du Dolomieu (Raid 10 Joueurs)',
+                description: 'Le Seigneur du Dolomieu (World Boss · 28 000 PV) est impossible à vaincre seul ! Alliez-vous jusqu\'à 10 joueurs (Tanks, Healers et DPS) au Cratère Dolomieu pour briser sa Carapace Magmatique et obtenir à coup sûr un objet LÉGENDAIRE chacun.',
                 completionText: 'Victoire légendaire ! Toute l\'île de La Réunion chante ton nom, champion de SymfonyForever !',
                 giverNpcCode: 'vulcanologue_piton',
                 turnInNpcCode: 'vulcanologue_piton',

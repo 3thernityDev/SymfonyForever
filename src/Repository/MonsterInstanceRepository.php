@@ -72,4 +72,20 @@ class MonsterInstanceRepository extends ServiceEntityRepository
             return ($dx * $dx + $dz * $dz) <= $r2;
         }));
     }
+
+    /**
+     * @return list<MonsterInstance>
+     */
+    public function findWorldBosses(): array
+    {
+        /** @var list<MonsterInstance> $result */
+        $result = $this->createQueryBuilder('m')
+            ->join('m.template', 't')->addSelect('t')
+            ->where('t.isWorldBoss = :wb')
+            ->setParameter('wb', true)
+            ->getQuery()
+            ->getResult();
+
+        return $result;
+    }
 }

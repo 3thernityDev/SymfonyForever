@@ -57,7 +57,7 @@ final class PartyController extends AbstractController
         }
 
         if ($party->getMembers()->count() >= Party::MAX_MEMBERS) {
-            return $this->json(['ok' => false, 'error' => 'Le groupe est complet (5 joueurs max).'], 422);
+            return $this->json(['ok' => false, 'error' => 'Le groupe/raid est complet (10 joueurs max).'], 422);
         }
 
         $target->setPendingPartyInviteId($party->getId());

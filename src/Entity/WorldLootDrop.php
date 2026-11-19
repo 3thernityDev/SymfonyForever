@@ -70,6 +70,8 @@ class WorldLootDrop
         ?int $ownerCharacterId,
         ?int $ownerPartyId,
         float $now,
+        float $lockDuration = 60.0,
+        float $lifetime = 150.0,
     ) {
         $this->zoneCode = $zoneCode;
         $this->sourceName = $sourceName;
@@ -81,8 +83,8 @@ class WorldLootDrop
         $this->highestRarity = $highestRarity;
         $this->ownerCharacterId = $ownerCharacterId;
         $this->ownerPartyId = $ownerPartyId;
-        $this->freeForAllAt = $now + 60.0;
-        $this->expiresAt = $now + 150.0;
+        $this->freeForAllAt = $now + $lockDuration;
+        $this->expiresAt = $now + $lifetime;
     }
 
     public function getId(): ?int
@@ -148,6 +150,16 @@ class WorldLootDrop
     public function getHighestRarity(): string
     {
         return $this->highestRarity;
+    }
+
+    public function isPersonalChest(): bool
+    {
+        return $this->ownerCharacterId !== null && $this->ownerPartyId === null;
+    }
+
+    public function getOwnerCharacterId(): ?int
+    {
+        return $this->ownerCharacterId;
     }
 
     public function canBeLootedBy(Character $character, float $now): bool

@@ -64,6 +64,22 @@ export class VfxManager {
     }
 
     if (ev.eventType === 'DAMAGE' || ev.eventType === 'DOT') {
+      if (ev.skillCode === 'boss_eruption') {
+        if (sourcePos) {
+          this.spawnExpandingRing(sourcePos, '#ef4444', 24.0, 0.85);
+          this.spawnExpandingRing(sourcePos, '#f97316', 18.0, 0.65);
+        }
+        this.spawnBurst(pos.clone().add(new THREE.Vector3(0, 1.6, 0)), '#ff4500', 0.48);
+        this.spawnFloatingText(
+          pos.clone().add(new THREE.Vector3(0, 3.0, 0)),
+          `🌋 -${ev.amount}`,
+          '#fca5a5',
+          ev.isCrit ? 22 : 18,
+          camera,
+        );
+        return;
+      }
+
       if (sourcePos && (skill?.vfxStyle === 'FIREBALL' || skill?.vfxStyle === 'SOLAR' || skill?.vfxStyle === 'METEOR')) {
         this.spawnProjectile(sourcePos.clone().add(new THREE.Vector3(0, 1.8, 0)), pos.clone().add(new THREE.Vector3(0, 1.4, 0)), colorHex);
       }

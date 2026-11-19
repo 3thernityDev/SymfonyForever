@@ -60,6 +60,15 @@ class MonsterInstance
     #[ORM\Column(type: 'json')]
     private array $threatTable = [];
 
+    /**
+     * Persistent raid participation tracker for World Bosses (kept even if a participant dies mid-fight;
+     * cleared only when the boss resets to IDLE or dies & drops personal Legendary chests).
+     *
+     * @var array<string, float> characterId (as string key) => cumulative contribution
+     */
+    #[ORM\Column(type: 'json', options: ['default' => '[]'])]
+    private array $raidContributors = [];
+
     #[ORM\Column(nullable: true)]
     private ?int $tauntedByCharacterId = null;
 
@@ -82,6 +91,12 @@ class MonsterInstance
 
     #[ORM\Column]
     private float $lastAttackAt = 0.0;
+
+    #[ORM\Column(options: ['default' => 0.0])]
+    private float $lastSpecialAt = 0.0;
+
+    #[ORM\Column(options: ['default' => 1])]
+    private int $phase = 1;
 
     #[ORM\Column]
     private float $respawnAt = 0.0;
@@ -225,6 +240,54 @@ class MonsterInstance
         $this->threatTable[$key] = ($this->threatTable[$key] ?? 0.0) + max(0.0, $amount);
     }
 
+    /**
+     * @return array<string, float>
+     */
+    public function getRaidContributors(): array
+    {
+        return $this->raidContributors;
+    }
+
+    /**
+     * @param array<string, float> $raidContributors
+     */
+    public function setRaidContributors(array $raidContributors): self
+    {
+        $this->raidContributors = $raidContributors;
+
+        return $this;
+    }
+
+    public function addRaidContribution(int $characterId, float $amount): void
+    {
+        if ($characterId <= 0 || $amount <= 0.0) {
+            return;
+        }
+        $key = (string) $characterId;
+        $this->raidContributors[$key] = ($this->raidContributors[$key] ?? 0.0) + $amount;
+    }
+
+    /**
+     * @return list<int>
+     */
+    public function getRaidContributorIds(): array
+    {
+        $ids = [];
+        foreach (array_keys($this->raidContributors) as $k) {
+            $id = (int) $k;
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+
+        return $ids;
+    }
+
+    public function getRaidContributorCount(): int
+    {
+        return count($this->raidContributors);
+    }
+
     public function getTopThreatCharacterId(float $now): ?int
     {
         if ($this->tauntedByCharacterId !== null && $this->tauntExpiresAt > $now) {
@@ -313,6 +376,30 @@ class MonsterInstance
     public function setLastAttackAt(float $lastAttackAt): self
     {
         $this->lastAttackAt = $lastAttackAt;
+
+        return $this;
+    }
+
+    public function getLastSpecialAt(): float
+    {
+        return $this->lastSpecialAt;
+    }
+
+    public function setLastSpecialAt(float $lastSpecialAt): self
+    {
+        $this->lastSpecialAt = $lastSpecialAt;
+
+        return $this;
+    }
+
+    public function getPhase(): int
+    {
+        return $this->phase;
+    }
+
+    public function setPhase(int $phase): self
+    {
+        $this->phase = max(1, $phase);
 
         return $this;
     }

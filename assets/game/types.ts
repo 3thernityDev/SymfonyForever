@@ -288,9 +288,33 @@ export interface MonsterState {
   primaryColor: string;
   scale: number;
   isBoss: boolean;
+  isWorldBoss?: boolean;
+  phase?: number;
+  participantCount?: number;
+  carapaceActive?: boolean;
+  respawnRemaining?: number;
   aggressive: boolean;
   targetCharacterId: number | null;
   effects: ActiveEffectView[];
+}
+
+export interface WorldBossSummary {
+  id: number;
+  code: string;
+  name: string;
+  level: number;
+  zoneCode: string;
+  x: number;
+  z: number;
+  hp: number;
+  maxHp: number;
+  state: 'IDLE' | 'COMBAT' | 'RETURNING' | 'DEAD';
+  phase: number;
+  activeEngaged: number;
+  participantCount: number;
+  carapaceActive: boolean;
+  recommendedPlayers: number;
+  respawnRemaining: number;
 }
 
 export interface CombatEventData {
@@ -356,5 +380,6 @@ export interface SyncResponse {
   quests: QuestStatePayload;
   inventory: InventoryStatePayload;
   lootDrops: WorldLootDropState[];
+  worldBoss?: WorldBossSummary | null;
   pendingInvite: { partyId: number; label: string } | null;
 }

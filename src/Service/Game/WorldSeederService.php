@@ -71,16 +71,19 @@ final class WorldSeederService
             ['lezard_obsidienne', 'Lézard d\'Obsidienne', 7, 420, 48, 24, 325, 15.0, 6.0, 10.5, 1.8, 26, true, false, 'lizard', '#1e293b', 1.3],
 
             // Piton des Neiges (Niv 7-9)
-            ['colosse_nuages', 'Colosse des Nuages (Élite)', 9, 820, 62, 34, 620, 17.0, 7.5, 9.5, 2.0, 40, true, true, 'golem', '#cbd5e1', 1.85],
+            ['colosse_nuages', 'Colosse des Nuages (Élite)', 9, 820, 62, 34, 620, 17.0, 7.5, 9.5, 2.0, 40, true, true, false, 'golem', '#cbd5e1', 1.85],
 
-            // Piton de la Fournaise (Niv 8-10 + World Boss)
-            ['molosse_magma', 'Molosse de Magma', 8, 560, 58, 28, 440, 16.0, 6.5, 10.5, 1.9, 30, true, false, 'hound', '#ea580c', 1.35],
-            ['seigneur_dolomieu', 'Seigneur du Dolomieu (Boss)', 10, 2100, 88, 42, 1650, 22.0, 9.0, 10.0, 2.1, 60, true, true, 'boss_volcano', '#dc2626', 2.45],
+            // Piton de la Fournaise (Niv 8-10 + World Boss 10 Joueurs)
+            ['molosse_magma', 'Molosse de Magma', 8, 560, 58, 28, 440, 16.0, 6.5, 10.5, 1.9, 30, true, false, false, 'hound', '#ea580c', 1.35],
+            ['seigneur_dolomieu', 'Seigneur du Dolomieu (World Boss)', 10, 28000, 215, 68, 5000, 28.0, 12.5, 9.5, 1.8, 180, true, true, true, 'boss_volcano', '#dc2626', 3.8],
         ];
 
         $templates = [];
         foreach ($templateSpecs as $spec) {
-            [$code, $name, $lvl, $hp, $atk, $def, $xp, $aggro, $range, $speed, $interval, $respawn, $aggressive, $isBoss, $mesh, $color, $scale] = $spec;
+            if (count($spec) === 17) {
+                array_splice($spec, 14, 0, [false]);
+            }
+            [$code, $name, $lvl, $hp, $atk, $def, $xp, $aggro, $range, $speed, $interval, $respawn, $aggressive, $isBoss, $isWorldBoss, $mesh, $color, $scale] = $spec;
             $tpl = $this->templateRepository->findOneByCode($code);
             if (!$tpl instanceof MonsterTemplate) {
                 $tpl = new MonsterTemplate($code, $name);
@@ -99,6 +102,7 @@ final class WorldSeederService
                 ->setRespawnSeconds($respawn)
                 ->setAggressive($aggressive)
                 ->setIsBoss($isBoss)
+                ->setIsWorldBoss($isWorldBoss)
                 ->setMeshKey($mesh)
                 ->setPrimaryColor($color)
                 ->setScale($scale);
@@ -189,6 +193,25 @@ final class WorldSeederService
             }
             $this->em->flush();
         } else {
+            // Sync existing IDLE monster HP with updated templates (e.g. upgraded World Boss 28,000 HP)
+            $allInstances = $this->instanceRepository->findAll();
+            $hasWorldBoss = false;
+            foreach ($allInstances as $inst) {
+                $tpl = $inst->getTemplate();
+                if ($tpl->isWorldBoss()) {
+                    $hasWorldBoss = true;
+                }
+                if ($inst->getState() === MonsterInstance::STATE_IDLE && $inst->getCurrentHp() !== $tpl->getMaxHp()) {
+                    $inst->setCurrentHp($tpl->getMaxHp());
+                }
+            }
+            if (!$hasWorldBoss && isset($templates['seigneur_dolomieu'])) {
+                $pos = $this->terrainService->findNearestWalkable(440.0, 275.0);
+                $wb = new MonsterInstance($templates['seigneur_dolomieu'], 'fournaise', $pos['x'], $pos['y'], $pos['z']);
+                $this->em->persist($wb);
+                ++$existingCount;
+            }
+            $this->em->flush();
             $spawned = $existingCount;
         }
 

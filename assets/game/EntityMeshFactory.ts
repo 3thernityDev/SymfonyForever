@@ -388,12 +388,14 @@ export interface MonsterVisual {
   body: THREE.Group;
   targetRing: THREE.Mesh;
   hitFlash: number;
+  orbitGroup?: THREE.Group;
 }
 
 export function createMonsterMesh(meshKey: string, primaryColor: string, scale: number, isBoss: boolean): MonsterVisual {
   const group = new THREE.Group();
   const body = new THREE.Group();
   group.add(body);
+  let orbitGroup: THREE.Group | undefined;
 
   const mainMat = mat(primaryColor, 0.65, 0.2);
   const eyeMat = mat(0xfef08a, 0.2, 0.2, 0xfacc15);
@@ -417,24 +419,81 @@ export function createMonsterMesh(meshKey: string, primaryColor: string, scale: 
     wings.position.y = 2.2;
     body.add(core, wings);
   } else if (meshKey === 'golem' || meshKey === 'boss_volcano') {
-    const glow = meshKey === 'boss_volcano' ? 0xff4500 : undefined;
-    const gMat = mat(primaryColor, 0.7, 0.35, glow);
-    const torso = new THREE.Mesh(new THREE.DodecahedronGeometry(1.05, 0), gMat);
-    torso.position.y = 1.85;
-    const head = new THREE.Mesh(new THREE.OctahedronGeometry(0.58), mat(0x1f2937, 0.5, 0.4, glow));
-    head.position.y = 3.0;
-    const armGeo = new THREE.BoxGeometry(0.52, 1.65, 0.52);
+    const isVolcanoBoss = meshKey === 'boss_volcano';
+    const glow = isVolcanoBoss ? 0xff4500 : undefined;
+    const gMat = mat(isVolcanoBoss ? 0x271212 : primaryColor, 0.65, 0.3, glow);
+    const lavaMat = mat(0xff5500, 0.15, 0.25, 0xff4500);
+    lavaMat.emissiveIntensity = 1.2;
+
+    const torso = new THREE.Mesh(new THREE.DodecahedronGeometry(1.12, 0), gMat);
+    torso.position.y = 1.95;
+    const head = new THREE.Mesh(new THREE.OctahedronGeometry(0.62), mat(0x1f2937, 0.45, 0.35, glow));
+    head.position.y = 3.15;
+    const armGeo = new THREE.BoxGeometry(0.58, 1.75, 0.58);
     const aL = new THREE.Mesh(armGeo, gMat);
-    aL.position.set(-1.28, 1.6, 0.15);
+    aL.position.set(-1.38, 1.65, 0.18);
     const aR = aL.clone();
-    aR.position.x = 1.28;
+    aR.position.x = 1.38;
     body.add(torso, head, aL, aR);
 
-    if (isBoss) {
-      // Lava crown & orbiting magma ring for Seigneur du Dolomieu
-      const crown = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.12, 6, 12), mat(0xf97316, 0.2, 0.4, 0xff5500));
+    if (isVolcanoBoss) {
+      // Colossal Volcanic World Boss enhancements: molten heart, horns, spikes & orbiting magma rings!
+      const lavaCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), lavaMat);
+      lavaCore.position.set(0, 1.95, 0.85);
+      const hornGeo = new THREE.ConeGeometry(0.18, 0.95, 5);
+      const hL = new THREE.Mesh(hornGeo, lavaMat);
+      hL.position.set(-0.55, 3.65, 0.05);
+      hL.rotation.z = 0.42;
+      const hR = hL.clone();
+      hR.position.x = 0.55;
+      hR.rotation.z = -0.42;
+
+      const spGeo = new THREE.ConeGeometry(0.32, 1.15, 5);
+      const sL = new THREE.Mesh(spGeo, lavaMat);
+      sL.position.set(-1.45, 2.85, 0);
+      sL.rotation.z = 0.52;
+      const sR = sL.clone();
+      sR.position.x = 1.45;
+      sR.rotation.z = -0.52;
+
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.13, 6, 14), lavaMat);
       crown.rotation.x = Math.PI / 2;
-      crown.position.y = 3.55;
+      crown.position.y = 3.72;
+
+      // Orbiting twin volcanic rings + magma shards
+      orbitGroup = new THREE.Group();
+      orbitGroup.position.set(0, 2.25, 0);
+      const ring1 = new THREE.Mesh(
+        new THREE.TorusGeometry(2.15, 0.09, 6, 28),
+        new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.78 }),
+      );
+      ring1.rotation.x = Math.PI / 2.3;
+      const ring2 = new THREE.Mesh(
+        new THREE.TorusGeometry(1.85, 0.07, 6, 24),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15, transparent: true, opacity: 0.65 }),
+      );
+      ring2.rotation.set(Math.PI / 3, 0.4, 0.6);
+      for (let i = 0; i < 4; i++) {
+        const ang = (i * Math.PI) / 2;
+        const shard = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 0), lavaMat);
+        shard.position.set(Math.cos(ang) * 2.15, 0, Math.sin(ang) * 2.15);
+        orbitGroup.add(shard);
+      }
+      orbitGroup.add(ring1, ring2);
+      body.add(lavaCore, hL, hR, sL, sR, crown, orbitGroup);
+
+      // Fiery volcanic danger perimeter on ground
+      const dangerHalo = new THREE.Mesh(
+        new THREE.RingGeometry(1.75, 2.15, 36),
+        new THREE.MeshBasicMaterial({ color: 0xef4444, side: THREE.DoubleSide, transparent: true, opacity: 0.55 }),
+      );
+      dangerHalo.rotation.x = -Math.PI / 2;
+      dangerHalo.position.y = 0.06;
+      body.add(dangerHalo);
+    } else if (isBoss) {
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.12, 6, 12), mat(0x38bdf8, 0.2, 0.4, 0x38bdf8));
+      crown.rotation.x = Math.PI / 2;
+      crown.position.y = 3.6;
       body.add(crown);
     }
   } else {
@@ -485,7 +544,7 @@ export function createMonsterMesh(meshKey: string, primaryColor: string, scale: 
   targetRing.visible = false;
   group.add(targetRing);
 
-  return { group, body, targetRing, hitFlash: 0 };
+  return { group, body, targetRing, hitFlash: 0, orbitGroup };
 }
 
 export interface NpcVisual {

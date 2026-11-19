@@ -58,6 +58,9 @@ class MonsterTemplate
     #[ORM\Column]
     private bool $isBoss = false;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $isWorldBoss = false;
+
     #[ORM\Column(length: 32)]
     private string $meshKey = 'crab';
 
@@ -235,6 +238,18 @@ class MonsterTemplate
     public function setIsBoss(bool $isBoss): self
     {
         $this->isBoss = $isBoss;
+
+        return $this;
+    }
+
+    public function isWorldBoss(): bool
+    {
+        return $this->isWorldBoss;
+    }
+
+    public function setIsWorldBoss(bool $isWorldBoss): self
+    {
+        $this->isWorldBoss = $isWorldBoss;
 
         return $this;
     }

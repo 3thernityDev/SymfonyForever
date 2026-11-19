@@ -1,4 +1,4 @@
-import type { LandmarkMeta, MonsterState, NpcData, PublicPlayer, QuestStatePayload } from './types';
+import type { LandmarkMeta, MonsterState, NpcData, PublicPlayer, QuestStatePayload, WorldBossSummary } from './types';
 
 export class Minimap {
   private readonly ctx: CanvasRenderingContext2D;
@@ -31,6 +31,7 @@ export class Minimap {
     npcs: NpcData[],
     quests: QuestStatePayload | null,
     timeSec: number,
+    worldBoss: WorldBossSummary | null = null,
   ): void {
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -86,6 +87,34 @@ export class Minimap {
         ctx.beginPath();
         ctx.arc(nx, ny, 2.2, 0, Math.PI * 2);
         ctx.fill();
+      }
+    }
+
+    // Global World Boss Pulsing Crimson/Gold Beacon (visible from anywhere on La Réunion!)
+    if (worldBoss) {
+      const [bx, by] = toPx(worldBoss.x, worldBoss.z);
+      const alive = worldBoss.state !== 'DEAD';
+      if (alive) {
+        const pulse = 7.5 + Math.sin(timeSec * 4.5) * 3.0;
+        ctx.strokeStyle = worldBoss.state === 'COMBAT' ? '#facc15' : '#ef4444';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(bx, by, pulse, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#dc2626';
+        ctx.strokeStyle = '#fde047';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(bx, by, 4.8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else {
+        ctx.strokeStyle = 'rgba(148,163,184,0.65)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(bx, by, 4.2, 0, Math.PI * 2);
+        ctx.stroke();
       }
     }
 

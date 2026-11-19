@@ -35,6 +35,7 @@ import type {
   SelfState,
   SkillData,
   SyncResponse,
+  WorldBossSummary,
   WorldLootDropState,
 } from './types';
 import { VfxManager } from './VfxManager';
@@ -102,6 +103,7 @@ class SymfonyForeverGame {
   private partyState: PartyState | null = null;
   private questState: QuestStatePayload | null = null;
   private inventoryState: InventoryStatePayload | null = null;
+  private worldBossState: WorldBossSummary | null = null;
   private classSkills: SkillData[] = [];
 
   private readonly remotePlayers = new Map<number, RemotePlayerEntry>();
@@ -286,8 +288,13 @@ class SymfonyForeverGame {
         entry.visual.group.position.lerp(entry.targetPos, Math.min(1, dt * 6.5));
         entry.visual.group.rotation.y = this.lerpAngle(entry.visual.group.rotation.y, entry.state.rotY, Math.min(1, dt * 7));
         entry.visual.body.position.y = Math.sin(elapsed * (entry.state.state === 'COMBAT' ? 9 : 2.5) + id) * 0.12;
+        if (entry.visual.orbitGroup) {
+          const speedMult = (entry.state.phase ?? 1) >= 2 ? 2.4 : 1.1;
+          entry.visual.orbitGroup.rotation.y += dt * speedMult;
+          entry.visual.orbitGroup.rotation.z = Math.sin(elapsed * 1.4) * 0.25;
+        }
         entry.visual.targetRing.visible = this.targetType === 'MONSTER' && this.targetId === id;
-        const heightOffset = entry.state.isBoss ? 5.6 : 2.6 * entry.state.scale;
+        const heightOffset = entry.state.isWorldBoss ? 14.5 : entry.state.isBoss ? 5.6 : 2.6 * entry.state.scale;
         this.updateNameplate(entry.nameplate, entry.visual.group.position, heightOffset, entry.state.hp, entry.state.maxHp, true);
       }
 
@@ -312,6 +319,7 @@ class SymfonyForeverGame {
         this.manifest.npcs,
         this.questState,
         elapsed,
+        this.worldBossState,
       );
 
       this.updateQuestDistanceLabel();
@@ -370,6 +378,8 @@ class SymfonyForeverGame {
   private applySync(resp: SyncResponse, isFirst: boolean): void {
     this.selfState = resp.self;
     this.partyState = resp.party;
+    this.worldBossState = resp.worldBoss ?? null;
+    this.updateWorldBossHud();
 
     if (resp.correctedPosition) {
       this.controller.teleport(resp.self.x, resp.self.y, resp.self.z);
@@ -567,6 +577,19 @@ class SymfonyForeverGame {
         travelSelect.appendChild(opt);
       }
     }
+    document.getElementById('wb-minimap-pill')?.addEventListener('click', () => {
+      if (travelSelect && this.worldBossState) {
+        travelSelect.value = this.worldBossState.zoneCode;
+      }
+      if (this.worldBossState) {
+        if (this.worldBossState.state === 'DEAD') {
+          this.showToast(`World Boss vaincu ! Réapparition dans ${Math.ceil(this.worldBossState.respawnRemaining)}s au Cratère Dolomieu.`);
+        } else {
+          this.showToast(`🌋 ${this.worldBossState.name} (28 000 PV) attend au Piton de la Fournaise ! Alliez-vous jusqu'à 10 joueurs pour un Légendaire garanti.`);
+        }
+      }
+    });
+
     document.getElementById('btn-travel')?.addEventListener('click', async () => {
       const code = travelSelect?.value;
       if (!code) return;
@@ -2111,6 +2134,81 @@ class SymfonyForeverGame {
         this.showToast(`Acheté : ${res.itemName ?? 'article'} (-${res.cost ?? 0} Or)`);
       });
     });
+  }
+
+  private updateWorldBossHud(): void {
+    const wb = this.worldBossState;
+    const hudEl = document.getElementById('world-boss-hud');
+    const pillEl = document.getElementById('wb-minimap-pill');
+    const pillStatus = document.getElementById('wb-minimap-status');
+
+    if (pillEl && pillStatus) {
+      if (!wb) {
+        pillEl.style.display = 'none';
+      } else {
+        pillEl.style.display = 'flex';
+        const isDead = wb.state === 'DEAD';
+        pillEl.classList.toggle('dead', isDead);
+        if (isDead) {
+          const secs = Math.max(0, Math.ceil(wb.respawnRemaining));
+          const mins = Math.floor(secs / 60);
+          const rem = secs % 60;
+          pillStatus.textContent = `Respawn ${mins}m${String(rem).padStart(2, '0')}s`;
+        } else if (wb.state === 'COMBAT') {
+          const pct = Math.max(1, Math.round((wb.hp / Math.max(1, wb.maxHp)) * 100));
+          pillStatus.textContent = `⚔️ ${pct}% (${wb.participantCount}/10)`;
+        } else {
+          pillStatus.textContent = 'Actif · Fournaise';
+        }
+      }
+    }
+
+    if (!hudEl) return;
+    if (!wb || wb.state === 'DEAD') {
+      hudEl.classList.remove('visible');
+      return;
+    }
+
+    const dist = Math.hypot(wb.x - this.controller.x, wb.z - this.controller.z);
+    const inZoneOrNear = this.selfState?.zoneCode === wb.zoneCode || dist <= 220;
+    hudEl.classList.toggle('visible', inZoneOrNear);
+    if (!inZoneOrNear) return;
+
+    const pct = Math.max(0, Math.min(100, (wb.hp / Math.max(1, wb.maxHp)) * 100));
+    const nameEl = document.getElementById('wb-name');
+    const badgeEl = document.getElementById('wb-phase-badge');
+    const fillEl = document.getElementById('wb-hp-fill');
+    const txtEl = document.getElementById('wb-hp-text');
+    const alliesEl = document.getElementById('wb-allies');
+    const capEl = document.getElementById('wb-carapace');
+
+    if (nameEl) nameEl.textContent = wb.name;
+    if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
+    if (txtEl) txtEl.textContent = `${wb.hp.toLocaleString('fr-FR')} / ${wb.maxHp.toLocaleString('fr-FR')} (${Math.round(pct)}%)`;
+
+    if (badgeEl) {
+      if (wb.phase >= 2) {
+        badgeEl.textContent = '🔥 PHASE 2 : FUREUR';
+        badgeEl.classList.add('phase2');
+      } else {
+        badgeEl.textContent = `RAID ${wb.recommendedPlayers} JOUEURS`;
+        badgeEl.classList.remove('phase2');
+      }
+    }
+
+    if (alliesEl) {
+      alliesEl.textContent = `👥 ${wb.participantCount} / ${wb.recommendedPlayers} Alliés`;
+    }
+
+    if (capEl) {
+      if (wb.carapaceActive) {
+        capEl.textContent = '🛡️ Carapace (Régén. actif · 3+ requis)';
+        capEl.className = 'wb-pill warn';
+      } else {
+        capEl.textContent = '⚔️ Carapace Brisée !';
+        capEl.className = 'wb-pill ok';
+      }
+    }
   }
 
   private showToast(msg: string): void {
