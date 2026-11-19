@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller\Api;
 
 use App\Game\CharacterClass;
+use App\Game\ItemRegistry;
 use App\Game\NpcRegistry;
 use App\Game\QuestRegistry;
 use App\Game\SkillRegistry;
@@ -21,6 +22,7 @@ final class ManifestController extends AbstractController
         SkillRegistry $skillRegistry,
         NpcRegistry $npcRegistry,
         QuestRegistry $questRegistry,
+        ItemRegistry $itemRegistry,
         ReunionTerrainService $terrainService,
     ): JsonResponse {
         $classes = [];
@@ -31,6 +33,11 @@ final class ManifestController extends AbstractController
         $skills = [];
         foreach ($skillRegistry->all() as $skill) {
             $skills[$skill->code] = $skill->toArray();
+        }
+
+        $vendorStocks = [];
+        foreach ($npcRegistry->all() as $npc) {
+            $vendorStocks[$npc->code] = $itemRegistry->vendorStockForNpc($npc->code);
         }
 
         return $this->json([
@@ -50,6 +57,8 @@ final class ManifestController extends AbstractController
             'landmarks' => WorldCatalog::landmarks(),
             'npcs' => $npcRegistry->toManifestArray($terrainService),
             'quests' => $questRegistry->toManifestArray(),
+            'items' => $itemRegistry->toManifestArray(),
+            'vendorStocks' => $vendorStocks,
             'classes' => $classes,
             'skills' => $skills,
             'gcd' => SkillRegistry::GLOBAL_COOLDOWN,

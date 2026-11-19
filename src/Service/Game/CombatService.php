@@ -21,6 +21,7 @@ final class CombatService
         private readonly StatCalculator $statCalculator,
         private readonly LevelingService $levelingService,
         private readonly QuestService $questService,
+        private readonly InventoryService $inventoryService,
         private readonly CharacterRepository $characterRepository,
         private readonly MonsterInstanceRepository $monsterRepository,
     ) {
@@ -220,6 +221,9 @@ final class CombatService
         );
         $this->em->persist($killEvent);
         $createdEvents[] = $killEvent;
+
+        // Spawn a 3D loot chest/bag on the ground for the killer / party!
+        $this->inventoryService->spawnLootForMonster($monster, $killer, $now);
 
         if ($killer === null) {
             return [0, false];

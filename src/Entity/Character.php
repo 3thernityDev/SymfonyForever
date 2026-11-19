@@ -6,6 +6,8 @@ namespace App\Entity;
 
 use App\Game\CharacterClass;
 use App\Repository\CharacterRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: CharacterRepository::class)]
@@ -40,6 +42,13 @@ class Character
 
     #[ORM\Column]
     private int $statPoints = 0;
+
+    #[ORM\Column(options: ['default' => 25])]
+    private int $gold = 25;
+
+    /** @var Collection<int, CharacterItem> */
+    #[ORM\OneToMany(targetEntity: CharacterItem::class, mappedBy: 'character', cascade: ['persist', 'remove'])]
+    private Collection $items;
 
     #[ORM\Column]
     private int $vitality = 10;
@@ -128,6 +137,7 @@ class Character
         $this->name = $name;
         $this->classCode = $class->value;
         $this->createdAt = new \DateTimeImmutable();
+        $this->items = new ArrayCollection();
 
         $stats = $class->baseStats();
         $this->vitality = $stats['vitality'];
@@ -218,6 +228,42 @@ class Character
     public function setStatPoints(int $statPoints): self
     {
         $this->statPoints = max(0, $statPoints);
+
+        return $this;
+    }
+
+    public function getGold(): int
+    {
+        return $this->gold;
+    }
+
+    public function setGold(int $gold): self
+    {
+        $this->gold = max(0, $gold);
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, CharacterItem>
+     */
+    public function getItems(): Collection
+    {
+        return $this->items;
+    }
+
+    public function addItem(CharacterItem $item): self
+    {
+        if (!$this->items->contains($item)) {
+            $this->items->add($item);
+        }
+
+        return $this;
+    }
+
+    public function removeItem(CharacterItem $item): self
+    {
+        $this->items->removeElement($item);
 
         return $this;
     }

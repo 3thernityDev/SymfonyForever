@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import {
   animateAvatar,
+  createLootDropMesh,
   createMonsterMesh,
   createNpcMesh,
   createPlayerAvatar,
   type AnimatedAvatar,
+  type LootVisual,
   type MonsterVisual,
   type NpcVisual,
 } from './EntityMeshFactory';
@@ -17,6 +19,10 @@ import type {
   ChatMessageData,
   ClassCode,
   CombatEventData,
+  EquipmentSlot,
+  InventoryStatePayload,
+  ItemDefinitionData,
+  ItemRarity,
   ManifestResponse,
   MonsterState,
   NpcData,
@@ -26,6 +32,7 @@ import type {
   SelfState,
   SkillData,
   SyncResponse,
+  WorldLootDropState,
 } from './types';
 import { VfxManager } from './VfxManager';
 
@@ -49,6 +56,27 @@ interface NpcEntry {
   nameplate: HTMLDivElement;
 }
 
+interface LootEntry {
+  state: WorldLootDropState;
+  visual: LootVisual;
+  nameplate: HTMLDivElement;
+}
+
+const RARITY_COLORS: Record<ItemRarity, string> = {
+  COMMON: '#e2e8f0',
+  UNCOMMON: '#22c55e',
+  RARE: '#38bdf8',
+  EPIC: '#c084fc',
+  LEGENDARY: '#fb923c',
+};
+
+const SLOT_LABELS: Record<EquipmentSlot, string> = {
+  WEAPON: '⚔️ Arme',
+  ARMOR: '🛡️ Armure',
+  HELM: '🪖 Coiffe',
+  ACCESSORY: '💠 Talisman',
+};
+
 class SymfonyForeverGame {
   private readonly canvas: HTMLCanvasElement;
   private readonly floatingLayer: HTMLElement;
@@ -70,14 +98,17 @@ class SymfonyForeverGame {
   private selfState: SelfState | null = null;
   private partyState: PartyState | null = null;
   private questState: QuestStatePayload | null = null;
+  private inventoryState: InventoryStatePayload | null = null;
   private classSkills: SkillData[] = [];
 
   private readonly remotePlayers = new Map<number, RemotePlayerEntry>();
   private readonly monsters = new Map<number, MonsterEntry>();
   private readonly npcs = new Map<string, NpcEntry>();
+  private readonly lootDrops = new Map<number, LootEntry>();
   private readonly seenEventIds = new Set<number>();
   private readonly notifiedReadyQuests = new Set<string>();
   private lastQuestSignature = '';
+  private lastInventorySignature = '';
 
   private lastEventId = 0;
   private lastChatId = 0;
@@ -88,8 +119,11 @@ class SymfonyForeverGame {
   private activeChatTab: 'ZONE' | 'GLOBAL' | 'PARTY' | 'COMBAT' = 'ZONE';
   private readonly chatHistory: { channel: string; html: string }[] = [];
   private charModalOpen = false;
+  private bagModalOpen = false;
   private activeNpcModalCode: string | null = null;
+  private activeNpcModalTab: 'QUESTS' | 'VENDOR' = 'QUESTS';
   private nearestNpcCode: string | null = null;
+  private nearestLootId: number | null = null;
   private toastTimeout: number | null = null;
   private bannerTimeout: number | null = null;
 
@@ -241,8 +275,9 @@ class SymfonyForeverGame {
         this.updateNameplate(entry.nameplate, entry.visual.group.position, heightOffset, entry.state.hp, entry.state.maxHp, true);
       }
 
-      // Animate NPCs, markers & proximity interaction prompt
+      // Animate NPCs, loot drops, markers & proximity prompts
       this.updateNpcsFrame(elapsed);
+      this.updateLootDropsFrame(elapsed);
 
       // Update environment, VFX, minimap & local cooldown countdowns
       this.worldRenderer.update(dt, elapsed);
@@ -417,6 +452,12 @@ class SymfonyForeverGame {
     if (resp.quests) {
       this.applyQuestState(resp.quests, isFirst);
     }
+    if (resp.inventory) {
+      this.applyInventoryState(resp.inventory);
+    }
+    if (resp.lootDrops) {
+      this.reconcileLootDrops(resp.lootDrops);
+    }
   }
 
   private handleCombatEvent(ev: CombatEventData): void {
@@ -524,7 +565,7 @@ class SymfonyForeverGame {
 
     const handleFocusPause = () => {
       const typing = document.activeElement === chatInput || document.activeElement === partyInput;
-      this.controller.setInputBlocked(typing || this.charModalOpen || this.activeNpcModalCode !== null);
+      this.controller.setInputBlocked(typing || this.charModalOpen || this.bagModalOpen || this.activeNpcModalCode !== null);
     };
     chatInput.addEventListener('focus', handleFocusPause);
     chatInput.addEventListener('blur', handleFocusPause);
@@ -543,6 +584,8 @@ class SymfonyForeverGame {
           (document.activeElement as HTMLElement).blur();
         } else if (this.activeNpcModalCode !== null) {
           this.closeNpcModal();
+        } else if (this.bagModalOpen) {
+          this.toggleBagModal(false);
         } else if (this.charModalOpen) {
           this.toggleCharModal(false);
         } else {
@@ -552,7 +595,22 @@ class SymfonyForeverGame {
       }
       if (typing) return;
 
-      if (e.code === 'KeyE' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen) {
+      if (e.code === 'KeyI' && !e.repeat && this.activeNpcModalCode === null) {
+        e.preventDefault();
+        if (this.charModalOpen) this.toggleCharModal(false);
+        this.toggleBagModal(!this.bagModalOpen);
+        return;
+      }
+
+      if (e.code === 'KeyF' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen) {
+        if (this.nearestLootId !== null) {
+          e.preventDefault();
+          void this.pickupLootById(this.nearestLootId);
+          return;
+        }
+      }
+
+      if (e.code === 'KeyE' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen) {
         if (this.nearestNpcCode) {
           e.preventDefault();
           this.openNpcModal(this.nearestNpcCode);
@@ -560,7 +618,7 @@ class SymfonyForeverGame {
         }
       }
 
-      if (this.activeNpcModalCode !== null) return;
+      if (this.activeNpcModalCode !== null || this.bagModalOpen) return;
 
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -590,12 +648,29 @@ class SymfonyForeverGame {
       });
     }
 
-    // Character Sheet Modal & NPC Dialogue Modal
-    document.getElementById('btn-char-sheet')?.addEventListener('click', () => this.toggleCharModal(!this.charModalOpen));
+    // Character Sheet, Bag & NPC Dialogue Modals
+    document.getElementById('btn-char-sheet')?.addEventListener('click', () => {
+      if (this.bagModalOpen) this.toggleBagModal(false);
+      this.toggleCharModal(!this.charModalOpen);
+    });
     document.getElementById('btn-close-char-modal')?.addEventListener('click', () => this.toggleCharModal(false));
+    document.getElementById('btn-bag-modal')?.addEventListener('click', () => {
+      if (this.charModalOpen) this.toggleCharModal(false);
+      this.toggleBagModal(!this.bagModalOpen);
+    });
+    document.getElementById('btn-close-bag-modal')?.addEventListener('click', () => this.toggleBagModal(false));
     document.getElementById('btn-close-npc-modal')?.addEventListener('click', () => this.closeNpcModal());
     document.getElementById('npc-interact-prompt')?.addEventListener('click', () => {
       if (this.nearestNpcCode) this.openNpcModal(this.nearestNpcCode);
+    });
+    document.getElementById('loot-pickup-prompt')?.addEventListener('click', () => {
+      if (this.nearestLootId !== null) void this.pickupLootById(this.nearestLootId);
+    });
+    document.querySelectorAll<HTMLButtonElement>('[data-npc-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = (btn.dataset.npcTab as 'QUESTS' | 'VENDOR') ?? 'QUESTS';
+        this.switchNpcModalTab(tab);
+      });
     });
 
     // Respawn button
@@ -687,6 +762,9 @@ class SymfonyForeverGame {
     this.raycaster.setFromCamera(this.pointerNdc, this.camera);
 
     const pickables: THREE.Object3D[] = [];
+    for (const l of this.lootDrops.values()) {
+      pickables.push(l.visual.group);
+    }
     for (const n of this.npcs.values()) {
       pickables.push(n.visual.group);
     }
@@ -700,10 +778,14 @@ class SymfonyForeverGame {
     const hits = this.raycaster.intersectObjects(pickables, true);
     if (hits.length > 0) {
       const ud = hits[0].object.userData as {
-        entityType?: 'MONSTER' | 'PLAYER' | 'NPC';
+        entityType?: 'MONSTER' | 'PLAYER' | 'NPC' | 'LOOT';
         entityId?: number;
         npcCode?: string;
       };
+      if (ud.entityType === 'LOOT' && ud.entityId) {
+        void this.pickupLootById(ud.entityId);
+        return;
+      }
       if (ud.entityType === 'NPC' && ud.npcCode) {
         this.openNpcModal(ud.npcCode);
         return;
@@ -849,6 +931,7 @@ class SymfonyForeverGame {
     };
 
     setText('hud-level', String(s.level));
+    setText('hud-gold', `🪙 ${s.gold ?? 0}`);
     setText('hud-hp-text', `${s.hp} / ${s.maxHp}`);
     setText('hud-mp-text', `${s.mp} / ${s.maxMp}`);
     setWidth('hud-hp-fill', (s.hp / Math.max(1, s.maxHp)) * 100);
@@ -1006,12 +1089,14 @@ class SymfonyForeverGame {
     const listEl = document.getElementById('modal-attributes');
     if (listEl) {
       listEl.innerHTML = attrs
-        .map(
-          ([key, label, hint]) => `
+        .map(([key, label, hint]) => {
+          const bonus = s.equipmentBonuses?.[key] ?? 0;
+          const bonusTag = bonus > 0 ? `<small style="color:#34d399; font-weight:700;"> (+${bonus})</small>` : '';
+          return `
         <div class="attr-row">
           <div><strong>${label}</strong><div style="font-size:11px; color:var(--text-muted)">${hint}</div></div>
           <div style="display:flex; align-items:center; gap:8px;">
-            <strong style="font-size:15px; color:#e0f2fe;">${s.attributes[key]}</strong>
+            <strong style="font-size:15px; color:#e0f2fe;">${s.attributes[key]}${bonusTag}</strong>
             ${
               s.statPoints > 0
                 ? `<button type="button" class="mini-btn" data-alloc="${key}">+1</button>`
@@ -1019,8 +1104,8 @@ class SymfonyForeverGame {
             }
           </div>
         </div>
-      `,
-        )
+      `;
+        })
         .join('');
 
       listEl.querySelectorAll<HTMLButtonElement>('[data-alloc]').forEach((btn) => {
@@ -1298,16 +1383,35 @@ class SymfonyForeverGame {
       return;
     }
 
+    if (this.bagModalOpen) this.toggleBagModal(false);
+    if (this.charModalOpen) this.toggleCharModal(false);
+
     this.activeNpcModalCode = npcCode;
     this.controller.setInputBlocked(true);
     document.getElementById('npc-modal')?.classList.add('open');
+    this.switchNpcModalTab('QUESTS');
     this.renderNpcModalContent(npcCode);
+    this.renderNpcVendorContent(npcCode);
   }
 
   private closeNpcModal(): void {
     this.activeNpcModalCode = null;
     document.getElementById('npc-modal')?.classList.remove('open');
-    this.controller.setInputBlocked(this.charModalOpen);
+    this.controller.setInputBlocked(this.charModalOpen || this.bagModalOpen);
+  }
+
+  private switchNpcModalTab(tab: 'QUESTS' | 'VENDOR'): void {
+    this.activeNpcModalTab = tab;
+    document.querySelectorAll<HTMLButtonElement>('[data-npc-tab]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.npcTab === tab);
+    });
+    const qEl = document.getElementById('npc-modal-quests');
+    const vEl = document.getElementById('npc-modal-vendor');
+    if (qEl) qEl.style.display = tab === 'QUESTS' ? 'block' : 'none';
+    if (vEl) vEl.style.display = tab === 'VENDOR' ? 'block' : 'none';
+    if (tab === 'VENDOR' && this.activeNpcModalCode) {
+      this.renderNpcVendorContent(this.activeNpcModalCode);
+    }
   }
 
   private renderNpcModalContent(npcCode: string): void {
@@ -1442,6 +1546,455 @@ class SymfonyForeverGame {
             ? `Quête validée ! +${res.rewardXp} XP${bonus} — NIVEAU ${res.newLevel} !`
             : `Quête validée ! +${res.rewardXp} XP${bonus}`,
         );
+      });
+    });
+  }
+
+  private reconcileLootDrops(drops: WorldLootDropState[]): void {
+    const seen = new Set<number>();
+    for (const d of drops) {
+      seen.add(d.id);
+      let entry = this.lootDrops.get(d.id);
+      if (!entry) {
+        const visual = createLootDropMesh(d.highestRarity);
+        visual.group.position.set(d.x, d.y, d.z);
+        visual.group.traverse((obj) => {
+          obj.userData = { entityType: 'LOOT', entityId: d.id };
+        });
+        this.scene.add(visual.group);
+
+        const color = RARITY_COLORS[d.highestRarity] ?? '#e2e8f0';
+        const itemPreview = d.items
+          .map((it) => `${this.manifest.items[it.itemCode]?.name ?? it.itemCode}${it.quantity > 1 ? ` ×${it.quantity}` : ''}`)
+          .slice(0, 2)
+          .join(', ');
+        const el = document.createElement('div');
+        el.className = 'nameplate';
+        el.innerHTML = `<div class="np-label" style="color:${color}; background:rgba(7,17,26,0.72); border:1px solid ${color}55;">💰 ${d.gold > 0 ? `${d.gold} Or` : ''}${d.gold > 0 && itemPreview ? ' · ' : ''}${this.esc(itemPreview)}</div>`;
+        this.floatingLayer.appendChild(el);
+
+        entry = { state: d, visual, nameplate: el };
+        this.lootDrops.set(d.id, entry);
+      } else {
+        entry.state = d;
+      }
+    }
+
+    for (const [id, entry] of this.lootDrops) {
+      if (!seen.has(id)) {
+        this.scene.remove(entry.visual.group);
+        entry.nameplate.remove();
+        this.lootDrops.delete(id);
+      }
+    }
+  }
+
+  private updateLootDropsFrame(elapsed: number): void {
+    let closestId: number | null = null;
+    let closestDist = 15.0;
+
+    for (const [id, entry] of this.lootDrops) {
+      entry.visual.chest.rotation.y = elapsed * 1.4 + id;
+      entry.visual.chest.position.y = Math.sin(elapsed * 3.2 + id) * 0.14;
+
+      const d = Math.hypot(entry.state.x - this.controller.x, entry.state.z - this.controller.z);
+      if (entry.state.canLoot && d < closestDist) {
+        closestDist = d;
+        closestId = id;
+      }
+
+      const distCam = this.camera.position.distanceTo(entry.visual.group.position);
+      if (distCam > 110) {
+        entry.nameplate.style.display = 'none';
+        continue;
+      }
+      this.projVec.set(entry.state.x, entry.state.y + 1.8, entry.state.z).project(this.camera);
+      if (this.projVec.z > 1) {
+        entry.nameplate.style.display = 'none';
+        continue;
+      }
+      entry.nameplate.style.display = 'block';
+      entry.nameplate.style.left = `${(this.projVec.x * 0.5 + 0.5) * window.innerWidth}px`;
+      entry.nameplate.style.top = `${(-this.projVec.y * 0.5 + 0.5) * window.innerHeight}px`;
+    }
+
+    this.nearestLootId = closestId;
+    const promptEl = document.getElementById('loot-pickup-prompt');
+    if (promptEl) {
+      const show = closestId !== null && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen && !(this.selfState?.isDead ?? false);
+      promptEl.classList.toggle('visible', show);
+      if (show && closestId !== null) {
+        const drop = this.lootDrops.get(closestId)?.state;
+        promptEl.textContent = `💰 Appuyez sur [F] ou cliquez pour ramasser le butin (${drop?.sourceName ?? 'Coffre'})`;
+      }
+    }
+  }
+
+  private async pickupLootById(lootId: number): Promise<void> {
+    const res = await this.net.inventoryPost<{
+      goldGained?: number;
+      itemsGained?: { itemCode: string; name: string; quantity: number }[];
+      remaining?: boolean;
+    }>('/api/loot/pickup', {
+      characterId: this.characterId,
+      lootId,
+    });
+
+    if (!res.ok) {
+      this.showToast(res.error ?? 'Impossible de ramasser ce butin.');
+      return;
+    }
+
+    if (res.self) {
+      this.selfState = res.self;
+      this.updateSelfHud();
+    }
+    if (res.inventory) {
+      this.applyInventoryState(res.inventory);
+    }
+
+    if (!res.remaining) {
+      const entry = this.lootDrops.get(lootId);
+      if (entry) {
+        this.scene.remove(entry.visual.group);
+        entry.nameplate.remove();
+        this.lootDrops.delete(lootId);
+      }
+    }
+
+    const parts: string[] = [];
+    if (res.goldGained && res.goldGained > 0) parts.push(`+${res.goldGained} Or`);
+    if (res.itemsGained) {
+      for (const it of res.itemsGained) {
+        parts.push(`${it.name}${it.quantity > 1 ? ` ×${it.quantity}` : ''}`);
+      }
+    }
+    this.showToast(parts.length > 0 ? `Butin : ${parts.join(', ')}` : 'Butin ramassé !');
+  }
+
+  private applyInventoryState(inv: InventoryStatePayload): void {
+    const sig = JSON.stringify(inv);
+    const changed = sig !== this.lastInventorySignature;
+    this.lastInventorySignature = sig;
+    this.inventoryState = inv;
+
+    const badge = document.getElementById('bag-count-badge');
+    if (badge) badge.textContent = `${inv.bagSlotsUsed}/${inv.maxBagSlots}`;
+
+    if (changed) {
+      if (this.bagModalOpen) this.renderBagModalContent();
+      if (this.activeNpcModalCode !== null && this.activeNpcModalTab === 'VENDOR') {
+        this.renderNpcVendorContent(this.activeNpcModalCode);
+      }
+    }
+  }
+
+  private toggleBagModal(open: boolean): void {
+    this.bagModalOpen = open;
+    document.getElementById('bag-modal')?.classList.toggle('open', open);
+    this.controller.setInputBlocked(open || this.charModalOpen || this.activeNpcModalCode !== null);
+    if (open) this.renderBagModalContent();
+  }
+
+  private formatItemDetails(def: ItemDefinitionData): string {
+    const parts: string[] = [];
+    const bonusLabels: Record<string, string> = {
+      vitality: 'VIT',
+      strength: 'STR',
+      intelligence: 'INT',
+      defense: 'DEF',
+      spirit: 'SPI',
+    };
+    for (const [k, v] of Object.entries(def.bonuses)) {
+      if (v && v > 0) parts.push(`+${v} ${bonusLabels[k] ?? k}`);
+    }
+    if (def.restoreHp > 0) parts.push(`+${def.restoreHp} PV`);
+    if (def.restoreMp > 0) parts.push(`+${def.restoreMp} PM`);
+    if (def.minLevel > 1) parts.push(`Niv. ${def.minLevel}`);
+    if (def.sellPrice > 0) parts.push(`Vente: ${def.sellPrice} Or`);
+    return parts.join(' · ') || def.description;
+  }
+
+  private renderBagModalContent(): void {
+    const inv = this.inventoryState;
+    if (!inv) return;
+
+    const goldEl = document.getElementById('bag-modal-gold');
+    const slotsEl = document.getElementById('bag-modal-slots');
+    if (goldEl) goldEl.textContent = `🪙 ${inv.gold}`;
+    if (slotsEl) slotsEl.textContent = `${inv.bagSlotsUsed} / ${inv.maxBagSlots}`;
+
+    const eqEl = document.getElementById('bag-equipped-list');
+    if (eqEl) {
+      const slots: EquipmentSlot[] = ['WEAPON', 'ARMOR', 'HELM', 'ACCESSORY'];
+      eqEl.innerHTML = slots
+        .map((slot) => {
+          const ci = inv.equipped[slot];
+          if (!ci) {
+            return `
+              <div class="equip-slot-card" style="opacity:0.65;">
+                <div class="equip-slot-label">${SLOT_LABELS[slot]}</div>
+                <div style="font-size:12px; color:var(--text-muted);">Vide</div>
+              </div>
+            `;
+          }
+          const def = this.manifest.items[ci.itemCode];
+          const col = def ? RARITY_COLORS[def.rarity] : '#e2e8f0';
+          return `
+            <div class="equip-slot-card" style="border-color:${col}66;">
+              <div class="equip-slot-label">${SLOT_LABELS[slot]}</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                <div style="min-width:0;">
+                  <div style="font-weight:700; font-size:12.5px; color:${col};">${def?.icon ?? '📦'} ${this.esc(def?.name ?? ci.itemCode)}</div>
+                  <div style="font-size:10.5px; color:#86efac;">${def ? this.esc(this.formatItemDetails(def)) : ''}</div>
+                </div>
+                <button type="button" class="mini-btn" data-unequip-slot="${slot}">Retirer</button>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      eqEl.querySelectorAll<HTMLButtonElement>('[data-unequip-slot]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const slot = btn.dataset.unequipSlot;
+          if (!slot) return;
+          const res = await this.net.inventoryPost('/api/inventory/unequip', { characterId: this.characterId, slot });
+          if (!res.ok) {
+            this.showToast(res.error ?? 'Erreur déséquipement.');
+            return;
+          }
+          if (res.self) {
+            this.selfState = res.self;
+            this.updateSelfHud();
+          }
+          if (res.inventory) this.applyInventoryState(res.inventory);
+        });
+      });
+    }
+
+    const bagEl = document.getElementById('bag-items-list');
+    if (bagEl) {
+      if (inv.bag.length === 0) {
+        bagEl.innerHTML = '<p style="color:var(--text-muted); font-size:12px;">Votre sac est vide. Combattez des monstres sur l\'île pour récupérer du butin !</p>';
+        return;
+      }
+
+      bagEl.innerHTML = inv.bag
+        .map((ci) => {
+          const def = this.manifest.items[ci.itemCode];
+          if (!def) return '';
+          const col = RARITY_COLORS[def.rarity];
+          const primaryBtn =
+            def.type === 'EQUIPMENT'
+              ? `<button type="button" class="mini-btn" data-equip-id="${ci.id}">Équiper</button>`
+              : def.type === 'CONSUMABLE'
+                ? `<button type="button" class="mini-btn" style="background:rgba(16,185,129,0.28); color:#a7f3d0;" data-use-id="${ci.id}">Utiliser</button>`
+                : '';
+
+          return `
+            <div class="bag-row" style="border-left-color:${col};">
+              <div class="bag-row-main">
+                <div class="bag-row-title" style="color:${col};">
+                  <span>${def.icon}</span>
+                  <span>${this.esc(def.name)}</span>
+                  ${ci.quantity > 1 ? `<span class="lvl-badge">×${ci.quantity}</span>` : ''}
+                </div>
+                <div class="bag-row-sub">${this.esc(this.formatItemDetails(def))}</div>
+              </div>
+              <div class="bag-row-actions">
+                ${primaryBtn}
+                <button type="button" class="mini-btn mini-btn-red" data-drop-id="${ci.id}" title="Jeter">✕</button>
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      bagEl.querySelectorAll<HTMLButtonElement>('[data-equip-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const res = await this.net.inventoryPost('/api/inventory/equip', {
+            characterId: this.characterId,
+            characterItemId: Number(btn.dataset.equipId),
+          });
+          if (!res.ok) {
+            this.showToast(res.error ?? 'Impossible d\'équiper.');
+            return;
+          }
+          if (res.self) {
+            this.selfState = res.self;
+            this.updateSelfHud();
+          }
+          if (res.inventory) this.applyInventoryState(res.inventory);
+          this.showToast('Équipement équipé ! Vos stats ont été mises à jour.');
+        });
+      });
+
+      bagEl.querySelectorAll<HTMLButtonElement>('[data-use-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const res = await this.net.inventoryPost<{ restoredHp?: number; restoredMp?: number }>('/api/inventory/use', {
+            characterId: this.characterId,
+            characterItemId: Number(btn.dataset.useId),
+          });
+          if (!res.ok) {
+            this.showToast(res.error ?? 'Utilisation impossible.');
+            return;
+          }
+          if (res.self) {
+            this.selfState = res.self;
+            this.updateSelfHud();
+          }
+          if (res.inventory) this.applyInventoryState(res.inventory);
+          const msg: string[] = [];
+          if (res.restoredHp) msg.push(`+${res.restoredHp} PV`);
+          if (res.restoredMp) msg.push(`+${res.restoredMp} PM`);
+          this.showToast(msg.length > 0 ? `Consommé : ${msg.join(' · ')}` : 'Objet consommé.');
+        });
+      });
+
+      bagEl.querySelectorAll<HTMLButtonElement>('[data-drop-id]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const res = await this.net.inventoryPost('/api/inventory/drop', {
+            characterId: this.characterId,
+            characterItemId: Number(btn.dataset.dropId),
+          });
+          if (!res.ok) {
+            this.showToast(res.error ?? 'Impossible de jeter.');
+            return;
+          }
+          if (res.inventory) this.applyInventoryState(res.inventory);
+        });
+      });
+    }
+  }
+
+  private renderNpcVendorContent(npcCode: string): void {
+    const vEl = document.getElementById('npc-modal-vendor');
+    const inv = this.inventoryState;
+    if (!vEl || !inv) return;
+
+    let junkTotal = 0;
+    let junkCount = 0;
+    for (const ci of inv.bag) {
+      const def = this.manifest.items[ci.itemCode];
+      if (def && def.type === 'JUNK') {
+        junkTotal += def.sellPrice * ci.quantity;
+        junkCount += ci.quantity;
+      }
+    }
+
+    const sellRows = inv.bag
+      .map((ci) => {
+        const def = this.manifest.items[ci.itemCode];
+        if (!def || def.sellPrice <= 0) return '';
+        const col = RARITY_COLORS[def.rarity];
+        const total = def.sellPrice * ci.quantity;
+        return `
+          <div class="bag-row" style="border-left-color:${col};">
+            <div class="bag-row-main">
+              <div class="bag-row-title" style="color:${col};">${def.icon} ${this.esc(def.name)} ${ci.quantity > 1 ? `<span class="lvl-badge">×${ci.quantity}</span>` : ''}</div>
+              <div class="bag-row-sub">${this.esc(this.formatItemDetails(def))}</div>
+            </div>
+            <button type="button" class="mini-btn" style="background:rgba(250,204,21,0.2); color:#fde047;" data-sell-id="${ci.id}">Vendre (+${total} 🪙)</button>
+          </div>
+        `;
+      })
+      .join('');
+
+    const stockCodes = this.manifest.vendorStocks[npcCode] ?? [];
+    const buyRows = stockCodes
+      .map((code) => {
+        const def = this.manifest.items[code];
+        if (!def || def.buyPrice <= 0) return '';
+        const col = RARITY_COLORS[def.rarity];
+        const canAfford = inv.gold >= def.buyPrice;
+        return `
+          <div class="bag-row" style="border-left-color:${col};">
+            <div class="bag-row-main">
+              <div class="bag-row-title" style="color:${col};">${def.icon} ${this.esc(def.name)}</div>
+              <div class="bag-row-sub">${this.esc(this.formatItemDetails(def))}</div>
+            </div>
+            <button type="button" class="mini-btn" ${canAfford ? '' : 'style="opacity:0.45;"'} data-buy-code="${def.code}">Acheter (${def.buyPrice} 🪙)</button>
+          </div>
+        `;
+      })
+      .join('');
+
+    vEl.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <span class="gold-pill">Votre bourse : 🪙 ${inv.gold} Or (${inv.bagSlotsUsed}/${inv.maxBagSlots})</span>
+        ${
+          junkCount > 0
+            ? `<button type="button" class="mini-btn" style="background:rgba(250,204,21,0.28); color:#fef08a;" id="btn-sell-all-junk">🪙 Vendre tout le butin (+${junkTotal} Or)</button>`
+            : ''
+        }
+      </div>
+
+      <div style="font-size:11px; text-transform:uppercase; color:#fde047; font-weight:700; margin-bottom:5px;">Vendre depuis votre sac</div>
+      <div class="bag-list" style="max-height:175px; margin-bottom:12px;">
+        ${sellRows || '<div style="color:var(--text-muted); font-size:12px;">Aucun objet à vendre dans votre sac.</div>'}
+      </div>
+
+      <div style="font-size:11px; text-transform:uppercase; color:#5eead4; font-weight:700; margin-bottom:5px;">Boutique du PNJ</div>
+      <div class="bag-list" style="max-height:195px;">
+        ${buyRows}
+      </div>
+    `;
+
+    vEl.querySelector('#btn-sell-all-junk')?.addEventListener('click', async () => {
+      const res = await this.net.inventoryPost<{ goldEarned?: number; soldCount?: number }>('/api/vendor/sell-junk', {
+        characterId: this.characterId,
+        npcCode,
+      });
+      if (!res.ok) {
+        this.showToast(res.error ?? 'Vente impossible.');
+        return;
+      }
+      if (res.self) {
+        this.selfState = res.self;
+        this.updateSelfHud();
+      }
+      if (res.inventory) this.applyInventoryState(res.inventory);
+      this.showToast(`Vendu ${res.soldCount ?? 0} objet(s) de butin pour +${res.goldEarned ?? 0} Or !`);
+    });
+
+    vEl.querySelectorAll<HTMLButtonElement>('[data-sell-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const res = await this.net.inventoryPost<{ goldEarned?: number; itemName?: string }>('/api/vendor/sell', {
+          characterId: this.characterId,
+          characterItemId: Number(btn.dataset.sellId),
+          npcCode,
+        });
+        if (!res.ok) {
+          this.showToast(res.error ?? 'Vente impossible.');
+          return;
+        }
+        if (res.self) {
+          this.selfState = res.self;
+          this.updateSelfHud();
+        }
+        if (res.inventory) this.applyInventoryState(res.inventory);
+        this.showToast(`Vendu : ${res.itemName ?? 'objet'} (+${res.goldEarned ?? 0} Or)`);
+      });
+    });
+
+    vEl.querySelectorAll<HTMLButtonElement>('[data-buy-code]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const res = await this.net.inventoryPost<{ itemName?: string; cost?: number }>('/api/vendor/buy', {
+          characterId: this.characterId,
+          itemCode: btn.dataset.buyCode,
+          npcCode,
+        });
+        if (!res.ok) {
+          this.showToast(res.error ?? 'Achat impossible.');
+          return;
+        }
+        if (res.self) {
+          this.selfState = res.self;
+          this.updateSelfHud();
+        }
+        if (res.inventory) this.applyInventoryState(res.inventory);
+        this.showToast(`Acheté : ${res.itemName ?? 'article'} (-${res.cost ?? 0} Or)`);
       });
     });
   }

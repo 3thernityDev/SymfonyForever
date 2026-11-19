@@ -41,6 +41,8 @@ final class StatePayloadBuilder
             }
         }
 
+        $eq = $stats['equipmentBonuses'];
+
         return [
             'id' => $c->getId(),
             'name' => $c->getName(),
@@ -49,12 +51,21 @@ final class StatePayloadBuilder
             'xp' => $c->getXp(),
             'xpNext' => $this->statCalculator->xpForNextLevel($c->getLevel()),
             'statPoints' => $c->getStatPoints(),
-            'attributes' => [
+            'gold' => $c->getGold(),
+            'baseAttributes' => [
                 'vitality' => $c->getVitality(),
                 'strength' => $c->getStrength(),
                 'intelligence' => $c->getIntelligence(),
                 'defense' => $c->getDefense(),
                 'spirit' => $c->getSpirit(),
+            ],
+            'equipmentBonuses' => $eq,
+            'attributes' => [
+                'vitality' => $c->getVitality() + $eq['vitality'],
+                'strength' => $c->getStrength() + $eq['strength'],
+                'intelligence' => $c->getIntelligence() + $eq['intelligence'],
+                'defense' => $c->getDefense() + $eq['defense'],
+                'spirit' => $c->getSpirit() + $eq['spirit'],
             ],
             'derived' => $stats,
             'hp' => $c->getCurrentHp(),

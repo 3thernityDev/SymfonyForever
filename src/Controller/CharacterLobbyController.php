@@ -10,6 +10,7 @@ use App\Game\CharacterClass;
 use App\Game\SkillRegistry;
 use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
+use App\Service\Game\InventoryService;
 use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatCalculator;
 use Doctrine\ORM\EntityManagerInterface;
@@ -60,6 +61,7 @@ final class CharacterLobbyController extends AbstractController
         CharacterRepository $characterRepository,
         ReunionTerrainService $terrainService,
         StatCalculator $statCalculator,
+        InventoryService $inventoryService,
         EntityManagerInterface $em,
     ): Response {
         /** @var User $user */
@@ -114,6 +116,7 @@ final class CharacterLobbyController extends AbstractController
             ->setCurrentMp($stats['maxMp']);
 
         $em->persist($character);
+        $inventoryService->grantStarterItems($character);
         $em->flush();
 
         $this->addFlash('success', sprintf('%s (%s) est prêt à explorer La Réunion !', $name, $class->label()));

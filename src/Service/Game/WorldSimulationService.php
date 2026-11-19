@@ -11,6 +11,7 @@ use App\Entity\Zone;
 use App\Repository\CharacterRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
+use App\Repository\WorldLootDropRepository;
 use App\Repository\ZoneRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Lock\LockFactory;
@@ -31,6 +32,7 @@ final class WorldSimulationService
         private readonly CharacterRepository $characterRepository,
         private readonly MonsterInstanceRepository $monsterRepository,
         private readonly CombatEventRepository $combatEventRepository,
+        private readonly WorldLootDropRepository $lootRepository,
         private readonly ReunionTerrainService $terrainService,
         private readonly StatCalculator $statCalculator,
         private readonly CombatService $combatService,
@@ -79,9 +81,10 @@ final class WorldSimulationService
                 $this->tickMonster($monster, $playersById, $step, $now, $createdEvents);
             }
 
-            // 3. Opportunistic cleanup of old combat events (> 35 seconds)
+            // 3. Opportunistic cleanup of old combat events (> 35s) & expired ground loot
             if (mt_rand(1, 10) === 1) {
                 $this->combatEventRepository->purgeOlderThan($now - 35.0);
+                $this->lootRepository->purgeExpired($now);
             }
 
             $this->em->flush();

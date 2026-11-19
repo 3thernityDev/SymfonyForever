@@ -11,6 +11,8 @@ use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
+use App\Repository\WorldLootDropRepository;
+use App\Service\Game\InventoryService;
 use App\Service\Game\QuestService;
 use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatePayloadBuilder;
@@ -34,9 +36,11 @@ final class WorldSyncController extends AbstractController
         MonsterInstanceRepository $monsterRepository,
         CombatEventRepository $combatEventRepository,
         ChatMessageRepository $chatRepository,
+        WorldLootDropRepository $lootRepository,
         ReunionTerrainService $terrainService,
         WorldSimulationService $simulationService,
         QuestService $questService,
+        InventoryService $inventoryService,
         StatePayloadBuilder $payloadBuilder,
     ): JsonResponse {
         /** @var User $user */
@@ -114,6 +118,13 @@ final class WorldSyncController extends AbstractController
             self::INTEREST_RADIUS,
         );
 
+        $nearbyLoot = $lootRepository->findActiveNearby(
+            $character->getPosX(),
+            $character->getPosZ(),
+            self::INTEREST_RADIUS,
+            $now,
+        );
+
         $lastEventId = (int) ($data['lastEventId'] ?? 0);
         $lastChatId = (int) ($data['lastChatId'] ?? 0);
 
@@ -146,6 +157,11 @@ final class WorldSyncController extends AbstractController
             'chat' => array_map(static fn ($m): array => $m->toArray(), $chatMessages),
             'party' => $payloadBuilder->buildParty($character->getParty(), $now),
             'quests' => $questService->buildQuestState($character),
+            'inventory' => $inventoryService->buildInventoryState($character),
+            'lootDrops' => array_map(
+                static fn ($drop): array => $drop->toArray($character, $now),
+                $nearbyLoot,
+            ),
             'pendingInvite' => $character->getPendingPartyInviteId() !== null ? [
                 'partyId' => $character->getPendingPartyInviteId(),
                 'label' => $pendingInvitePartyName,

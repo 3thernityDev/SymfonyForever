@@ -1,4 +1,4 @@
-import type { ManifestResponse, QuestStatePayload, SelfState, SyncResponse } from './types';
+import type { InventoryStatePayload, ManifestResponse, QuestStatePayload, SelfState, SyncResponse } from './types';
 
 export class NetworkClient {
   public lastPingMs = 0;
@@ -176,5 +176,18 @@ export class NetworkClient {
       body: JSON.stringify(body),
     });
     return (await res.json()) as { ok: boolean; error?: string; message?: string };
+  }
+
+  public async inventoryPost<T extends Record<string, unknown> = Record<string, unknown>>(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<T & { ok: boolean; error?: string; self?: SelfState; inventory?: InventoryStatePayload }> {
+    const res = await fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return (await res.json()) as T & { ok: boolean; error?: string; self?: SelfState; inventory?: InventoryStatePayload };
   }
 }

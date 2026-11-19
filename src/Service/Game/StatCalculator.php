@@ -5,11 +5,44 @@ declare(strict_types=1);
 namespace App\Service\Game;
 
 use App\Entity\Character;
+use App\Game\ItemRegistry;
 
 final class StatCalculator
 {
+    private readonly ItemRegistry $itemRegistry;
+
+    public function __construct(?ItemRegistry $itemRegistry = null)
+    {
+        $this->itemRegistry = $itemRegistry ?? new ItemRegistry();
+    }
+
     /**
-     * Computes derived combat stats for a character.
+     * Returns total stat bonuses from currently equipped items.
+     *
+     * @return array{vitality: int, strength: int, intelligence: int, defense: int, spirit: int}
+     */
+    public function equipmentBonuses(Character $character): array
+    {
+        $bonuses = ['vitality' => 0, 'strength' => 0, 'intelligence' => 0, 'defense' => 0, 'spirit' => 0];
+
+        foreach ($character->getItems() as $item) {
+            if (!$item->isEquipped()) {
+                continue;
+            }
+            $def = $this->itemRegistry->get($item->getItemCode());
+            if ($def === null) {
+                continue;
+            }
+            foreach ($bonuses as $key => $val) {
+                $bonuses[$key] = $val + (int) ($def->bonuses[$key] ?? 0);
+            }
+        }
+
+        return $bonuses;
+    }
+
+    /**
+     * Computes derived combat stats for a character (base attributes + equipped gear).
      *
      * @return array{
      *   maxHp: int,
@@ -20,18 +53,20 @@ final class StatCalculator
      *   critChance: float,
      *   hpRegenPerSec: float,
      *   mpRegenPerSec: float,
-     *   activeDamageReductionBuff: float
+     *   activeDamageReductionBuff: float,
+     *   equipmentBonuses: array{vitality: int, strength: int, intelligence: int, defense: int, spirit: int}
      * }
      */
     public function compute(Character $character, ?float $now = null): array
     {
         $now ??= microtime(true);
 
-        $vit = $character->getVitality();
-        $str = $character->getStrength();
-        $int = $character->getIntelligence();
-        $def = $character->getDefense();
-        $spi = $character->getSpirit();
+        $eq = $this->equipmentBonuses($character);
+        $vit = $character->getVitality() + $eq['vitality'];
+        $str = $character->getStrength() + $eq['strength'];
+        $int = $character->getIntelligence() + $eq['intelligence'];
+        $def = $character->getDefense() + $eq['defense'];
+        $spi = $character->getSpirit() + $eq['spirit'];
         $lvl = $character->getLevel();
 
         $maxHp = 80 + $vit * 12 + ($lvl - 1) * 18;
@@ -61,6 +96,7 @@ final class StatCalculator
             'hpRegenPerSec' => round(3.0 + $vit * 0.45, 2),
             'mpRegenPerSec' => round(3.5 + $spi * 0.85, 2),
             'activeDamageReductionBuff' => $buffReduction,
+            'equipmentBonuses' => $eq,
         ];
     }
 

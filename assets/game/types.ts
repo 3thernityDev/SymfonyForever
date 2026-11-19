@@ -118,6 +118,54 @@ export interface QuestStatePayload {
   totalQuests: number;
 }
 
+export type ItemRarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
+export type EquipmentSlot = 'WEAPON' | 'ARMOR' | 'HELM' | 'ACCESSORY';
+
+export interface ItemDefinitionData {
+  code: string;
+  name: string;
+  description: string;
+  type: 'EQUIPMENT' | 'CONSUMABLE' | 'JUNK';
+  slot: EquipmentSlot | null;
+  rarity: ItemRarity;
+  minLevel: number;
+  icon: string;
+  sellPrice: number;
+  buyPrice: number;
+  stackable: boolean;
+  bonuses: Partial<Record<'vitality' | 'strength' | 'intelligence' | 'defense' | 'spirit', number>>;
+  restoreHp: number;
+  restoreMp: number;
+}
+
+export interface CharacterItemState {
+  id: number;
+  itemCode: string;
+  quantity: number;
+  equippedSlot: EquipmentSlot | null;
+}
+
+export interface InventoryStatePayload {
+  gold: number;
+  maxBagSlots: number;
+  bagSlotsUsed: number;
+  equipped: Record<EquipmentSlot, CharacterItemState | null>;
+  bag: CharacterItemState[];
+}
+
+export interface WorldLootDropState {
+  id: number;
+  zoneCode: string;
+  sourceName: string;
+  x: number;
+  y: number;
+  z: number;
+  gold: number;
+  items: { itemCode: string; quantity: number }[];
+  highestRarity: ItemRarity;
+  canLoot: boolean;
+}
+
 export interface ManifestResponse {
   gameTitle: string;
   world: {
@@ -135,6 +183,8 @@ export interface ManifestResponse {
   landmarks: LandmarkMeta[];
   npcs: NpcData[];
   quests: Record<string, QuestDefinitionData>;
+  items: Record<string, ItemDefinitionData>;
+  vendorStocks: Record<string, string[]>;
   classes: Record<ClassCode, ClassMeta>;
   skills: Record<string, SkillData>;
   gcd: number;
@@ -154,6 +204,21 @@ export interface SelfState {
   xp: number;
   xpNext: number;
   statPoints: number;
+  gold: number;
+  baseAttributes?: {
+    vitality: number;
+    strength: number;
+    intelligence: number;
+    defense: number;
+    spirit: number;
+  };
+  equipmentBonuses?: {
+    vitality: number;
+    strength: number;
+    intelligence: number;
+    defense: number;
+    spirit: number;
+  };
   attributes: {
     vitality: number;
     strength: number;
@@ -289,5 +354,7 @@ export interface SyncResponse {
   chat: ChatMessageData[];
   party: PartyState | null;
   quests: QuestStatePayload;
+  inventory: InventoryStatePayload;
+  lootDrops: WorldLootDropState[];
   pendingInvite: { partyId: number; label: string } | null;
 }

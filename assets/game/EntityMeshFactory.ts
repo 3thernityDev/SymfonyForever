@@ -452,3 +452,52 @@ export function createNpcMesh(coatColor: string, accentColor: string): NpcVisual
 
   return { group, markerMesh, markerMat };
 }
+
+export interface LootVisual {
+  group: THREE.Group;
+  chest: THREE.Group;
+}
+
+export function createLootDropMesh(rarity: string): LootVisual {
+  const group = new THREE.Group();
+  const chest = new THREE.Group();
+  group.add(chest);
+
+  const rarityColors: Record<string, number> = {
+    COMMON: 0xe2e8f0,
+    UNCOMMON: 0x22c55e,
+    RARE: 0x38bdf8,
+    EPIC: 0xc084fc,
+    LEGENDARY: 0xfb923c,
+  };
+  const glowColor = rarityColors[rarity] ?? 0xe2e8f0;
+
+  // Compact treasure chest / loot pouch
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.62, 0.68), mat(0x78350f, 0.7, 0.2));
+  box.position.y = 0.45;
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.16, 0.72), mat(0xfacc15, 0.35, 0.65, glowColor));
+  trim.position.y = 0.62;
+  const clasp = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), mat(glowColor, 0.15, 0.4, glowColor));
+  clasp.position.set(0, 0.56, 0.38);
+  chest.add(box, trim, clasp);
+
+  // Glowing ground ring
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.7, 0.95, 20),
+    new THREE.MeshBasicMaterial({ color: glowColor, side: THREE.DoubleSide, transparent: true, opacity: 0.75 }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.08;
+  group.add(ring);
+
+  // Vertical rarity loot beam
+  const beamHeight = rarity === 'LEGENDARY' ? 11 : rarity === 'EPIC' ? 8.5 : rarity === 'RARE' ? 6.5 : 4.2;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08, 0.38, beamHeight, 8, 1, true),
+    new THREE.MeshBasicMaterial({ color: glowColor, transparent: true, opacity: 0.3, side: THREE.DoubleSide }),
+  );
+  beam.position.y = beamHeight * 0.5 + 0.3;
+  group.add(beam);
+
+  return { group, chest };
+}
