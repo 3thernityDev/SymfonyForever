@@ -232,17 +232,20 @@ final class CombatService
         }
 
         $stats = $this->statCalculator->compute($caster, $now);
-        $primary = match ($cls) {
-            CharacterClass::HEAL => (float) $stats['spellPower'],
-            CharacterClass::TANK => ((float) $stats['attackPower'] * 0.65) + ($caster->getDefense() * 1.4),
-            default => (float) $stats['attackPower'],
+        $eq = $stats['equipmentBonuses'];
+        $lvl = $caster->getLevel();
+        $scalingAttr = match ($cls) {
+            CharacterClass::TANK => $caster->getVitality() + $eq['vitality'],
+            CharacterClass::HEAL => $caster->getIntelligence() + $eq['intelligence'],
+            CharacterClass::DPS => $caster->getStrength() + $eq['strength'],
         };
+        $primary = $scalingAttr * 2.5 + $lvl * 3.0;
         $aaMult = match ($cls) {
-            CharacterClass::TANK => 0.175,
+            CharacterClass::TANK => 0.150,
             CharacterClass::HEAL => 0.150,
-            default => 0.155,
+            CharacterClass::DPS => 0.155,
         };
-        $levelScale = 1.0 + ($caster->getLevel() - 1) * 0.13;
+        $levelScale = 1.0 + ($lvl - 1) * 0.13;
         if ($monster->getTemplate()->isWorldBoss()) {
             $levelScale = min(1.65, $levelScale);
         }

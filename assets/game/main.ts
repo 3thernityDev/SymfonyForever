@@ -1106,8 +1106,14 @@ class SymfonyForeverGame {
 
     const aaBtn = document.getElementById('skill-slot-aa');
     if (aaBtn) {
+      const aaStatLabel =
+        this.classCode === 'TANK'
+          ? 'Vitalité (VIT)'
+          : this.classCode === 'HEAL'
+            ? 'Intelligence (INT)'
+            : 'Force (STR)';
       aaBtn.style.setProperty('--skill-glow', '#fde047');
-      aaBtn.title = `Auto-attaque (Clic gauche) — Coûte 0, génère +${aaGain} ${resLabel} par coup (1.2s). Tuer un ennemi de même niveau prend ~30s à l'auto-attaque (4 sorts max avec vos compétences).`;
+      aaBtn.title = `Auto-attaque (Clic gauche) — Scale sur ${aaStatLabel}. Coûte 0, génère +${aaGain} ${resLabel} par coup (1.2s).`;
       aaBtn.innerHTML = `
         <span class="skill-key">Clic G.</span>
         <span class="skill-mana" style="color:${resColor};">+${aaGain} ${resShort}</span>
@@ -1467,9 +1473,9 @@ class SymfonyForeverGame {
     setText('modal-skill-pts', String(s.skillPoints ?? 0));
 
     const attrs: [keyof SelfState['attributes'], string, string][] = [
-      ['vitality', 'Vitalité (VIT)', '+12 PV max & régén.'],
-      ['strength', 'Force (STR)', '+2.5 Puissance Physique'],
-      ['intelligence', 'Intelligence (INT)', '+2.5 Puissance Magique / Soin'],
+      ['vitality', 'Vitalité (VIT)', '+12 PV max, régén. & auto-attaque Tank'],
+      ['strength', 'Force (STR)', '+2.5 Puissance Physique & auto-attaque DPS'],
+      ['intelligence', 'Intelligence (INT)', '+2.5 Puissance Magique / Soin & auto-attaque Heal'],
       ['defense', 'Défense (DEF)', 'Réduction des dégâts'],
       ['spirit', 'Esprit (SPI)', '+10 PM max & régén. mana'],
     ];

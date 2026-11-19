@@ -293,4 +293,68 @@ final class CombatAndSimulationTest extends KernelTestCase
         $buffR3 = (int) $this->combat->castSkill($tank, 'basalt_skin', null, null, $now + 40.0)['events'][0]['amount'];
         self::assertSame(48, $buffR3);
     }
+
+    public function testAutoAttackScalesOnStrForDpsVitForTankAndIntForHeal(): void
+    {
+        mt_srand(974);
+        $now = 12000.0;
+        $user = (new User())->setUsername('aa_scaler')->setEmail('aa@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $hub['respawnX'];
+        $hz = $hub['respawnZ'];
+
+        $dps = (new Character($user, 'StrDps', CharacterClass::DPS))->setLevel(5)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz);
+        $tank = (new Character($user, 'VitTank', CharacterClass::TANK))->setLevel(5)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz);
+        $heal = (new Character($user, 'IntHeal', CharacterClass::HEAL))->setLevel(5)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz);
+
+        foreach ([$dps, $tank, $heal] as $c) {
+            $s = $this->stats->compute($c, $now);
+            $c->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
+            $this->em->persist($c);
+        }
+
+        $tpl = (new MonsterTemplate('aa_dummy', 'Cible Basalte'))
+            ->setLevel(5)->setMaxHp(5000)->setDefense(10)->setXpReward(10);
+        $this->em->persist($tpl);
+        $dummy = new MonsterInstance($tpl, 'lagon_ouest', $hx + 3.0, 12.0, $hz);
+        $this->em->persist($dummy);
+        $this->em->flush();
+
+        $normAa = function (Character $actor, float $t) use ($dummy): float {
+            $res = $this->combat->performAutoAttack($actor, 'MONSTER', $dummy->getId(), $t);
+            self::assertTrue($res['ok']);
+            $ev = $res['events'][0];
+
+            return $ev['isCrit'] ? ((float) $ev['amount'] / 1.5) : (float) $ev['amount'];
+        };
+
+        // 1. DPS auto-attack scales strictly on STR (VIT untouched)
+        $dpsBase = $normAa($dps, $now);
+        $dps->setVitality($dps->getVitality() + 30);
+        $dpsWithVit = $normAa($dps, $now + 2.0);
+        self::assertLessThan($dpsBase * 1.25, $dpsWithVit, 'La VIT ne doit pas augmenter l\'auto-attaque du DPS mêlée.');
+        $dps->setStrength($dps->getStrength() + 30);
+        $dpsWithStr = $normAa($dps, $now + 4.0);
+        self::assertGreaterThan($dpsBase * 1.5, $dpsWithStr, 'La STR doit nettement augmenter l\'auto-attaque du DPS mêlée.');
+
+        // 2. TANK auto-attack scales strictly on VIT (STR & DEF untouched)
+        $tankBase = $normAa($tank, $now + 6.0);
+        $tank->setStrength($tank->getStrength() + 30)->setDefense($tank->getDefense() + 30);
+        $tankWithStrDef = $normAa($tank, $now + 8.0);
+        self::assertLessThan($tankBase * 1.25, $tankWithStrDef, 'STR/DEF ne doivent pas augmenter l\'auto-attaque du Tank.');
+        $tank->setVitality($tank->getVitality() + 30);
+        $tankWithVit = $normAa($tank, $now + 10.0);
+        self::assertGreaterThan($tankBase * 1.5, $tankWithVit, 'La VIT doit nettement augmenter l\'auto-attaque du Tank.');
+
+        // 3. HEAL auto-attack scales strictly on INT (STR untouched)
+        $healBase = $normAa($heal, $now + 12.0);
+        $heal->setStrength($heal->getStrength() + 30);
+        $healWithStr = $normAa($heal, $now + 14.0);
+        self::assertLessThan($healBase * 1.25, $healWithStr, 'La STR ne doit pas augmenter l\'auto-attaque du Heal.');
+        $heal->setIntelligence($heal->getIntelligence() + 30);
+        $healWithInt = $normAa($heal, $now + 16.0);
+        self::assertGreaterThan($healBase * 1.5, $healWithInt, 'L\'INT doit nettement augmenter l\'auto-attaque du Heal.');
+    }
 }
