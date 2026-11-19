@@ -227,4 +227,57 @@ final class CombatAndSimulationTest extends KernelTestCase
             $t = $tCast;
         }
     }
+
+    public function testSkillRanksScaleDamageHealingAndDefensiveBuffs(): void
+    {
+        mt_srand(42);
+        $now = 8000.0;
+        $user = (new User())->setUsername('scaler')->setEmail('sc@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $dps = (new Character($user, 'RankDps', CharacterClass::DPS))
+            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0);
+        $heal = (new Character($user, 'RankHeal', CharacterClass::HEAL))
+            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0);
+        $tank = (new Character($user, 'RankTank', CharacterClass::TANK))
+            ->setLevel(6)->setZoneCode('lagon_ouest')->setPosX(-585.0)->setPosY(12.0)->setPosZ(-95.0);
+
+        foreach ([$dps, $heal, $tank] as $c) {
+            $s = $this->stats->compute($c);
+            $c->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
+            $this->em->persist($c);
+        }
+
+        $tpl = (new MonsterTemplate('dummy_scale', 'Mannequin Basalte'))
+            ->setLevel(6)->setMaxHp(5000)->setDefense(20)->setXpReward(10);
+        $this->em->persist($tpl);
+        $dummy = new MonsterInstance($tpl, 'lagon_ouest', -582.0, 12.0, -95.0);
+        $this->em->persist($dummy);
+        $this->em->flush();
+
+        // 1. Damage scaling: ember_strike Rank 1 vs Rank 3 (+44%, normalizing crit multiplier)
+        $evDmg1 = $this->combat->castSkill($dps, 'ember_strike', 'MONSTER', $dummy->getId(), $now)['events'][0];
+        $dmgR1Norm = $evDmg1['isCrit'] ? ((float) $evDmg1['amount'] / 1.65) : (float) $evDmg1['amount'];
+        $dps->setSkillLevel('ember_strike', 3);
+        $evDmg3 = $this->combat->castSkill($dps, 'ember_strike', 'MONSTER', $dummy->getId(), $now + 5.0)['events'][0];
+        $dmgR3Norm = $evDmg3['isCrit'] ? ((float) $evDmg3['amount'] / 1.65) : (float) $evDmg3['amount'];
+        self::assertGreaterThan($dmgR1Norm * 1.25, $dmgR3Norm, 'Un sort offensif Rang 3 doit infliger nettement plus de dégâts qu\'au Rang 1.');
+
+        // 2. Healing scaling: faham_infusion Rank 1 vs Rank 3 (+44%, normalizing crit multiplier)
+        $tank->setCurrentHp(50);
+        $evHeal1 = $this->combat->castSkill($heal, 'faham_infusion', 'PLAYER', $tank->getId(), $now + 10.0)['events'][0];
+        $healR1Norm = $evHeal1['isCrit'] ? ((float) $evHeal1['amount'] / 1.5) : (float) $evHeal1['amount'];
+        $heal->setSkillLevel('faham_infusion', 3);
+        $tank->setCurrentHp(50);
+        $evHeal3 = $this->combat->castSkill($heal, 'faham_infusion', 'PLAYER', $tank->getId(), $now + 15.0)['events'][0];
+        $healR3Norm = $evHeal3['isCrit'] ? ((float) $evHeal3['amount'] / 1.5) : (float) $evHeal3['amount'];
+        self::assertGreaterThan($healR1Norm * 1.35, $healR3Norm, 'Un soin Rang 3 doit soigner nettement plus qu\'au Rang 1.');
+
+        // 3. Buff scaling: basalt_skin Rank 1 (40%) -> Rank 3 (48%)
+        $buffR1 = (int) $this->combat->castSkill($tank, 'basalt_skin', null, null, $now + 20.0)['events'][0]['amount'];
+        self::assertSame(40, $buffR1);
+        $tank->setSkillLevel('basalt_skin', 3);
+        $buffR3 = (int) $this->combat->castSkill($tank, 'basalt_skin', null, null, $now + 40.0)['events'][0]['amount'];
+        self::assertSame(48, $buffR3);
+    }
 }

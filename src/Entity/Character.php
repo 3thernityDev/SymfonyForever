@@ -43,6 +43,13 @@ class Character
     #[ORM\Column]
     private int $statPoints = 0;
 
+    #[ORM\Column(options: ['default' => 0])]
+    private int $skillPoints = 0;
+
+    /** @var array<string, int> skillCode => rank (1..5) */
+    #[ORM\Column(type: 'json', options: ['default' => '{}'])]
+    private array $skillLevels = [];
+
     #[ORM\Column(options: ['default' => 25])]
     private int $gold = 25;
 
@@ -228,6 +235,48 @@ class Character
     public function setStatPoints(int $statPoints): self
     {
         $this->statPoints = max(0, $statPoints);
+
+        return $this;
+    }
+
+    public function getSkillPoints(): int
+    {
+        return $this->skillPoints;
+    }
+
+    public function setSkillPoints(int $skillPoints): self
+    {
+        $this->skillPoints = max(0, $skillPoints);
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    public function getSkillLevels(): array
+    {
+        return $this->skillLevels;
+    }
+
+    /**
+     * @param array<string, int> $skillLevels
+     */
+    public function setSkillLevels(array $skillLevels): self
+    {
+        $this->skillLevels = $skillLevels;
+
+        return $this;
+    }
+
+    public function getSkillLevel(string $skillCode): int
+    {
+        return max(1, (int) ($this->skillLevels[$skillCode] ?? 1));
+    }
+
+    public function setSkillLevel(string $skillCode, int $rank): self
+    {
+        $this->skillLevels[$skillCode] = max(1, $rank);
 
         return $this;
     }

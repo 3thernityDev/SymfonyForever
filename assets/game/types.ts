@@ -208,6 +208,8 @@ export interface SelfState {
   xp: number;
   xpNext: number;
   statPoints: number;
+  skillPoints?: number;
+  skillLevels?: Record<string, number>;
   gold: number;
   resourceType?: 'RAGE' | 'ENERGY' | 'MANA';
   resourceLabel?: string;

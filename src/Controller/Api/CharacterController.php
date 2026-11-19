@@ -56,6 +56,43 @@ final class CharacterController extends AbstractController
         ]);
     }
 
+    #[Route('/api/character/upgrade-skill', name: 'api_character_upgrade_skill', methods: ['POST'])]
+    public function upgradeSkill(
+        Request $request,
+        CharacterRepository $characterRepository,
+        LevelingService $levelingService,
+        StatePayloadBuilder $payloadBuilder,
+        EntityManagerInterface $em,
+    ): JsonResponse {
+        /** @var User $user */
+        $user = $this->getUser();
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return $this->json(['ok' => false, 'error' => 'Requête invalide'], 400);
+        }
+
+        $character = $characterRepository->find((int) ($data['characterId'] ?? 0));
+        if (!$character instanceof Character || $character->getOwner()->getId() !== $user->getId()) {
+            return $this->json(['ok' => false, 'error' => 'Personnage non autorisé'], 403);
+        }
+
+        $skillCode = (string) ($data['skillCode'] ?? '');
+        $res = $levelingService->upgradeSkill($character, $skillCode);
+        if (!$res['ok']) {
+            return $this->json(['ok' => false, 'error' => $res['error'] ?? 'Amélioration impossible.'], 422);
+        }
+
+        $em->flush();
+        $now = microtime(true);
+
+        return $this->json([
+            'ok' => true,
+            'skillCode' => $skillCode,
+            'newRank' => $res['newRank'],
+            'self' => $payloadBuilder->buildSelf($character, $now),
+        ]);
+    }
+
     #[Route('/api/character/respawn', name: 'api_character_respawn', methods: ['POST'])]
     public function respawn(
         Request $request,

@@ -524,7 +524,9 @@ final class CombatService
         if ($monster->getTemplate()->isWorldBoss()) {
             $levelScale = min(1.65, $levelScale);
         }
-        $raw = ($skill->basePower + $scaling * $skill->powerMultiplier) * $levelScale;
+        $rank = $caster->getSkillLevel($skill->code);
+        $rankMult = LevelingService::skillPowerMultiplier($rank);
+        $raw = ($skill->basePower + $scaling * $skill->powerMultiplier) * $levelScale * $rankMult;
 
         // Execute bonus when target < 35% HP
         if ($skill->effectType === 'EXECUTE') {
@@ -568,8 +570,9 @@ final class CombatService
             $highest = $table === [] ? 50.0 : max($table);
             $table[(string) $caster->getId()] = max($table[(string) $caster->getId()] ?? 0.0, $highest * $skill->effectValue + 25.0);
             $monster->setThreatTable($table);
+            $tauntDuration = $skill->effectDuration + ($rank - 1) * 0.5;
             $monster->setTauntedByCharacterId((int) $caster->getId());
-            $monster->setTauntExpiresAt($now + $skill->effectDuration);
+            $monster->setTauntExpiresAt($now + $tauntDuration);
 
             $tauntEv = new CombatEvent(
                 $monster->getZoneCode(),
@@ -598,7 +601,7 @@ final class CombatService
                 $monster->getActiveEffects(),
                 static fn (array $e): bool => !($e['skillCode'] === $skill->code && $e['sourceId'] === (int) $caster->getId()),
             ));
-            $tickDmg = max(4.0, 9.0 + (float) $stats['spellPower'] * $skill->effectValue);
+            $tickDmg = max(4.0, (9.0 + (float) $stats['spellPower'] * $skill->effectValue) * $rankMult);
             $effects[] = [
                 'type' => 'DOT',
                 'skillCode' => $skill->code,
@@ -651,7 +654,9 @@ final class CombatService
         array &$createdEvents,
     ): void {
         $allyStats = $this->statCalculator->compute($ally, $now);
-        $rawHeal = $skill->basePower + (float) $stats['spellPower'] * $skill->powerMultiplier;
+        $rank = $caster->getSkillLevel($skill->code);
+        $rankMult = LevelingService::skillPowerMultiplier($rank);
+        $rawHeal = ($skill->basePower + (float) $stats['spellPower'] * $skill->powerMultiplier) * $rankMult;
         $critChance = min(0.75, (float) $stats['critChance'] + $skill->bonusCritChance);
         $isCrit = (mt_rand(1, 1000) / 1000.0) <= $critChance;
         if ($isCrit) {
@@ -669,7 +674,7 @@ final class CombatService
                 $ally->getActiveEffects(),
                 static fn (array $e): bool => !($e['skillCode'] === $skill->code && $e['sourceId'] === (int) $caster->getId()),
             ));
-            $tickHeal = max(6.0, 12.0 + (float) $stats['spellPower'] * $skill->effectValue);
+            $tickHeal = max(6.0, (12.0 + (float) $stats['spellPower'] * $skill->effectValue) * $rankMult);
             $effects[] = [
                 'type' => 'HOT',
                 'skillCode' => $skill->code,
@@ -724,6 +729,11 @@ final class CombatService
      */
     private function applySelfBuff(Character $caster, SkillDefinition $skill, float $now, array &$createdEvents): void
     {
+        $rank = $caster->getSkillLevel($skill->code);
+        $effectiveValue = $skill->effectType === 'DAMAGE_REDUCTION'
+            ? min(0.60, $skill->effectValue + ($rank - 1) * 0.04)
+            : $skill->effectValue;
+
         $effects = array_values(array_filter(
             $caster->getActiveEffects(),
             static fn (array $e): bool => $e['skillCode'] !== $skill->code,
@@ -732,7 +742,7 @@ final class CombatService
             'type' => (string) $skill->effectType,
             'skillCode' => $skill->code,
             'sourceId' => (int) $caster->getId(),
-            'value' => $skill->effectValue,
+            'value' => $effectiveValue,
             'expiresAt' => $now + $skill->effectDuration,
             'nextTickAt' => $now + $skill->effectDuration,
             'tickInterval' => 0.0,
@@ -749,7 +759,7 @@ final class CombatService
             (int) $caster->getId(),
             $caster->getName(),
             $skill->code,
-            (int) round($skill->effectValue * 100),
+            (int) round($effectiveValue * 100),
             false,
             $caster->getPosX(),
             $caster->getPosY(),

@@ -142,6 +142,19 @@ export class NetworkClient {
     return (await res.json()) as { ok: boolean; error?: string; self?: SelfState };
   }
 
+  public async upgradeSkill(
+    characterId: number,
+    skillCode: string,
+  ): Promise<{ ok: boolean; error?: string; skillCode?: string; newRank?: number; self?: SelfState }> {
+    const res = await fetch('/api/character/upgrade-skill', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId, skillCode }),
+    });
+    return (await res.json()) as { ok: boolean; error?: string; skillCode?: string; newRank?: number; self?: SelfState };
+  }
+
   public async respawn(characterId: number): Promise<{ ok: boolean; self?: SelfState }> {
     const res = await fetch('/api/character/respawn', {
       method: 'POST',

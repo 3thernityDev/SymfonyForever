@@ -543,7 +543,8 @@ class SymfonyForeverGame {
     } else if (ev.eventType === 'LEVEL_UP') {
       line = `<span style="color:#fde047">★ ${this.esc(ev.sourceName)} passe Niveau ${ev.amount} !</span>`;
       if (ev.sourceId === this.characterId) {
-        this.showToast(`Niveau ${ev.amount} atteint ! +3 points de stats disponibles (touche C).`);
+        const skillNote = ev.amount % 3 === 0 ? ' +1 point de compétence disponible !' : '';
+        this.showToast(`Niveau ${ev.amount} atteint ! +3 pts de stats${skillNote} (touche C).`);
       }
     }
 
@@ -1091,15 +1092,85 @@ class SymfonyForeverGame {
       const btn = document.getElementById(`skill-slot-${skill.slot}`);
       if (!btn) continue;
       btn.style.setProperty('--skill-glow', skill.vfxColor);
-      btn.title = `${skill.name} (Niv. ${skill.unlockLevel}) — ${skill.manaCost} ${resLabel}, CD ${skill.cooldown}s\n${skill.description}`;
+      btn.title = `${skill.name} (Rang 1/5 · Niv. ${skill.unlockLevel}) — ${skill.manaCost} ${resLabel}, CD ${skill.cooldown}s\n${skill.description}`;
       btn.innerHTML = `
         <span class="skill-key">${skill.slot}</span>
         <span class="skill-mana" style="color:${resColor};">${skill.manaCost} ${resShort}</span>
         <span class="skill-icon">${skill.icon}</span>
         <span class="skill-name">${this.esc(skill.name)}</span>
+        <span class="skill-rank-badge">R.1</span>
         <div class="skill-cd-sweep"></div>
         <div class="skill-cd-overlay"></div>
       `;
+
+      const upgBtn = document.getElementById(`skill-upgrade-${skill.slot}`);
+      upgBtn?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void this.upgradeSkillCode(skill.code, skill.slot);
+      });
+    }
+  }
+
+  private async upgradeSkillCode(skillCode: string, slot?: number): Promise<void> {
+    const res = await this.net.upgradeSkill(this.characterId, skillCode);
+    if (!res.ok) {
+      if (res.error) this.showToast(res.error);
+      return;
+    }
+
+    if (res.self) {
+      this.selfState = res.self;
+      this.updateSelfHud();
+    }
+
+    const skill = this.classSkills.find((s) => s.code === skillCode);
+    const resolvedSlot = slot ?? skill?.slot;
+    if (resolvedSlot) {
+      this.flashSkillButton(resolvedSlot, 'ready');
+    }
+    const newRank = res.newRank ?? 2;
+    const bonusPct = (newRank - 1) * 22;
+    this.showToast(`✨ ${skill?.name ?? skillCode} passe au Rang ${newRank} (+${bonusPct}% puissance) !`);
+  }
+
+  private updateSkillRankUi(): void {
+    const s = this.selfState;
+    if (!s) return;
+
+    const skillPoints = s.skillPoints ?? 0;
+    const resLabel = s.resourceLabel ?? this.manifest.classes[this.classCode]?.resourceLabel ?? 'Mana';
+
+    const banner = document.getElementById('skill-upgrade-banner');
+    const bannerTxt = document.getElementById('skill-upgrade-text');
+    if (banner) {
+      banner.classList.toggle('visible', skillPoints > 0);
+      if (bannerTxt && skillPoints > 0) {
+        bannerTxt.textContent = `${skillPoints} point${skillPoints > 1 ? 's' : ''} de compétence`;
+      }
+    }
+
+    for (const skill of this.classSkills) {
+      const rank = Math.max(1, s.skillLevels?.[skill.code] ?? 1);
+      const bonusPct = (rank - 1) * 22;
+      const btn = document.getElementById(`skill-slot-${skill.slot}`);
+      if (btn) {
+        const badge = btn.querySelector('.skill-rank-badge') as HTMLElement | null;
+        if (badge) {
+          badge.textContent = `R.${rank}`;
+          badge.classList.toggle('upgraded', rank > 1);
+        }
+        const scaleNote = bonusPct > 0 ? ` · Puissance +${bonusPct}%` : '';
+        btn.title = `${skill.name} (Rang ${rank}/5${scaleNote} · Niv. ${skill.unlockLevel}) — ${skill.manaCost} ${resLabel}, CD ${skill.cooldown}s\n${skill.description}`;
+      }
+
+      const upgBtn = document.getElementById(`skill-upgrade-${skill.slot}`);
+      if (upgBtn) {
+        const canUpgrade = skillPoints > 0 && s.level >= skill.unlockLevel && rank < 5;
+        upgBtn.classList.toggle('visible', canUpgrade);
+        if (canUpgrade) {
+          upgBtn.title = `Améliorer ${skill.name} (Rang ${rank} → ${rank + 1}, +22% dégâts/soins)`;
+        }
+      }
     }
   }
 
@@ -1217,8 +1288,12 @@ class SymfonyForeverGame {
 
     const sheetBtn = document.getElementById('btn-char-sheet');
     const badge = document.getElementById('stat-pts-badge');
-    if (sheetBtn) sheetBtn.classList.toggle('has-points', s.statPoints > 0);
-    if (badge) badge.textContent = s.statPoints > 0 ? `+${s.statPoints} pts` : '[C]';
+    const skillPts = s.skillPoints ?? 0;
+    const totalPts = s.statPoints + skillPts;
+    if (sheetBtn) sheetBtn.classList.toggle('has-points', totalPts > 0);
+    if (badge) badge.textContent = totalPts > 0 ? `+${totalPts} pts` : '[C]';
+
+    this.updateSkillRankUi();
 
     const buffsEl = document.getElementById('hud-buffs');
     if (buffsEl) {
@@ -1352,6 +1427,7 @@ class SymfonyForeverGame {
     setText('modal-char-name', `${s.name} — ${this.manifest.classes[s.classCode]?.label ?? s.classCode}`);
     setText('modal-lvl', String(s.level));
     setText('modal-stat-pts', String(s.statPoints));
+    setText('modal-skill-pts', String(s.skillPoints ?? 0));
 
     const attrs: [keyof SelfState['attributes'], string, string][] = [
       ['vitality', 'Vitalité (VIT)', '+12 PV max & régén.'],
@@ -1392,6 +1468,46 @@ class SymfonyForeverGame {
             this.selfState = res.self;
             this.updateSelfHud();
           }
+        });
+      });
+    }
+
+    const skillsListEl = document.getElementById('modal-skills-upgrade');
+    if (skillsListEl) {
+      const skillPts = s.skillPoints ?? 0;
+      skillsListEl.innerHTML = this.classSkills
+        .map((skill) => {
+          const rank = Math.max(1, s.skillLevels?.[skill.code] ?? 1);
+          const bonusPct = (rank - 1) * 22;
+          const unlocked = s.level >= skill.unlockLevel;
+          const isMax = rank >= 5;
+          const sub = !unlocked
+            ? `Débloqué au niveau ${skill.unlockLevel}`
+            : `Rang ${rank}/5 · Bonus : +${bonusPct}% puissance`;
+          const actionHtml = !unlocked
+            ? '<small style="color:#94a3b8;">Verrouillé</small>'
+            : isMax
+              ? '<small style="color:#fde047; font-weight:700;">MAX</small>'
+              : skillPts > 0
+                ? `<button type="button" class="mini-btn" style="background:rgba(250,204,21,0.25); color:#fde047;" data-upgrade-skill="${skill.code}">▲ Rang ${rank + 1} (+22%)</button>`
+                : '';
+
+          return `
+            <div class="attr-row">
+              <div>
+                <strong>${skill.icon} ${this.esc(skill.name)}</strong>
+                <div style="font-size:11px; color:var(--text-muted)">${this.esc(sub)}</div>
+              </div>
+              <div>${actionHtml}</div>
+            </div>
+          `;
+        })
+        .join('');
+
+      skillsListEl.querySelectorAll<HTMLButtonElement>('[data-upgrade-skill]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const code = btn.dataset.upgradeSkill;
+          if (code) void this.upgradeSkillCode(code);
         });
       });
     }

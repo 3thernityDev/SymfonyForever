@@ -7,12 +7,17 @@ namespace App\Service\Game;
 use App\Entity\Character;
 use App\Entity\MonsterInstance;
 use App\Entity\Party;
+use App\Game\SkillRegistry;
 
 final class StatePayloadBuilder
 {
+    private readonly SkillRegistry $skillRegistry;
+
     public function __construct(
         private readonly StatCalculator $statCalculator,
+        ?SkillRegistry $skillRegistry = null,
     ) {
+        $this->skillRegistry = $skillRegistry ?? new SkillRegistry();
     }
 
     /**
@@ -44,6 +49,10 @@ final class StatePayloadBuilder
         $eq = $stats['equipmentBonuses'];
         $cls = $c->getCharacterClass();
         $aaEndsAt = (float) ($c->getCooldowns()['auto_attack'] ?? 0.0);
+        $skillLevels = [];
+        foreach ($this->skillRegistry->forClass($cls) as $skill) {
+            $skillLevels[$skill->code] = $c->getSkillLevel($skill->code);
+        }
 
         return [
             'id' => $c->getId(),
@@ -53,6 +62,8 @@ final class StatePayloadBuilder
             'xp' => $c->getXp(),
             'xpNext' => $this->statCalculator->xpForNextLevel($c->getLevel()),
             'statPoints' => $c->getStatPoints(),
+            'skillPoints' => $c->getSkillPoints(),
+            'skillLevels' => $skillLevels,
             'gold' => $c->getGold(),
             'resourceType' => $cls->resourceType(),
             'resourceLabel' => $cls->resourceLabel(),

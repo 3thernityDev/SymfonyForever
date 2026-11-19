@@ -131,5 +131,23 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         $sync2 = json_decode((string) $this->client->getResponse()->getContent(), true);
         self::assertNotEmpty($sync2['chat']);
         self::assertSame('Oté La Réunion !', $sync2['chat'][0]['content']);
+
+        // 7. Upgrade a skill over HTTP (/api/character/upgrade-skill) using earned skill points
+        $em2 = self::getContainer()->get(EntityManagerInterface::class);
+        $c2 = $em2->find(Character::class, $char->getId());
+        self::assertInstanceOf(Character::class, $c2);
+        $c2->setLevel(3)->setSkillPoints(1);
+        $em2->flush();
+
+        $this->client->request('POST', '/api/character/upgrade-skill', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char->getId(),
+            'skillCode' => 'shield_bash',
+        ]));
+        self::assertResponseIsSuccessful();
+        $upg = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertTrue($upg['ok']);
+        self::assertSame(2, $upg['newRank']);
+        self::assertSame(0, $upg['self']['skillPoints']);
+        self::assertSame(2, $upg['self']['skillLevels']['shield_bash']);
     }
 }
