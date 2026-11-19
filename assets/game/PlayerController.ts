@@ -11,13 +11,16 @@ export class PlayerController {
   public z = -95;
   public rotY = 0;
   public isMoving = false;
+  public isSprinting = false;
+  public lastDistanceMoved = 0;
   public yaw = -Math.PI * 0.25; // Camera orbit yaw
   public pitch = 0.42;
   public distance = 18;
 
   private vy = 0;
   private isGrounded = true;
-  private readonly moveSpeed = 19.0;
+  private readonly walkSpeed = 6.0;
+  private readonly sprintSpeed = 11.5;
   private readonly keys = new Set<string>();
   private draggingCamera = false;
   private lastPointerX = 0;
@@ -118,7 +121,10 @@ export class PlayerController {
     }
 
     const hasInput = moveForward !== 0 || moveRight !== 0;
+    const prevX = this.x;
+    const prevZ = this.z;
     this.isMoving = false;
+    this.isSprinting = !isDead && !this.inputBlocked && (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'));
 
     if (hasInput) {
       // Camera-relative movement direction on XZ plane
@@ -135,7 +141,8 @@ export class PlayerController {
         dz /= len;
       }
 
-      const step = this.moveSpeed * dt;
+      const activeSpeed = this.isSprinting ? this.sprintSpeed : this.walkSpeed;
+      const step = activeSpeed * dt;
       const candX = this.x + dx * step;
       const candZ = this.z + dz * step;
 
@@ -159,6 +166,8 @@ export class PlayerController {
       while (diff < -Math.PI) diff += Math.PI * 2;
       this.rotY += diff * Math.min(1, dt * 14);
     }
+
+    this.lastDistanceMoved = Math.hypot(this.x - prevX, this.z - prevZ);
 
     // Gravity & ground clamping against Réunion heightmap
     const groundY = this.sampler.getHeight(this.x, this.z);

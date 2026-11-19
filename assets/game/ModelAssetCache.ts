@@ -18,7 +18,9 @@ interface CachedTemplate {
 
 const TIKAF_FBX_URL = '/assets/models/tikaf/Tikaf.fbx';
 const TIKAF_TEX_URL = '/assets/models/tikaf/Tikaf.webp';
-const DESIRED_HEIGHT = 2.95;
+const DESIRED_HEIGHT = 3.25;
+// Measured from R_Foot/L_Foot ground-contact stance velocity in walk.001 scaled to DESIRED_HEIGHT (3.25)
+export const TIKAF_FOOT_SPEED_AT_1X = 1.605;
 
 let tikafPromise: Promise<CachedTemplate> | null = null;
 

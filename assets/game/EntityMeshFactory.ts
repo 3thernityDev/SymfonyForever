@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { instantiateTikafRig } from './ModelAssetCache';
+import { instantiateTikafRig, TIKAF_FOOT_SPEED_AT_1X } from './ModelAssetCache';
 import type { ClassCode } from './types';
 
 export interface AnimatedAvatar {
@@ -202,31 +202,50 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
   return avatar;
 }
 
-export function animateAvatar(avatar: AnimatedAvatar, dt: number, isMoving: boolean, isDead: boolean, time: number): void {
+export function animateAvatar(
+  avatar: AnimatedAvatar,
+  dt: number,
+  isMoving: boolean,
+  isDead: boolean,
+  time: number,
+  distanceMoved = 0,
+): void {
   if (isDead) {
     avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, -Math.PI / 2, Math.min(1, dt * 8));
     avatar.body.position.y = THREE.MathUtils.lerp(avatar.body.position.y, 0.35, Math.min(1, dt * 8));
     return;
   }
 
-  // Custom FBX SkinnedMesh animation path (Tikaf for DPS)
+  // Custom FBX SkinnedMesh animation path (Tikaf for DPS) — strictly distance-driven to eliminate foot sliding!
   if (avatar.fbxRoot) {
-    let targetTiltX = isMoving ? 0.08 : 0.0;
+    const speed = dt > 0.0001 ? distanceMoved / dt : 0;
+    const activelyMoving = distanceMoved > 0.0015 || (isMoving && distanceMoved > 0.0002);
+    let targetTiltX = activelyMoving ? Math.min(0.14, speed * 0.012) : 0.0;
     let targetLungeZ = 0.0;
 
     if (avatar.fbxMixer && avatar.fbxWalkAction) {
-      if (isMoving) {
+      const clipLen = avatar.fbxWalkAction.getClip().duration || 2.3333;
+      const halfCycle = clipLen * 0.5;
+      if (activelyMoving) {
+        // Exact match: feet sweep backward at the same speed the character moves forward
+        const exactAnimStep = distanceMoved / TIKAF_FOOT_SPEED_AT_1X;
+        const clampedStep = Math.min(exactAnimStep, dt * 5.2);
         avatar.fbxWalkAction.paused = false;
-        avatar.fbxMixer.update(dt * 1.15);
+        avatar.fbxMixer.update(clampedStep);
       } else {
-        // Smoothly settle back toward standing neutral frame when idle
-        const clipLen = avatar.fbxWalkAction.getClip().duration || 1;
-        const cur = avatar.fbxWalkAction.time % clipLen;
-        if (cur > 0.03 && cur < clipLen - 0.03) {
+        // Smoothly settle onto the nearest double-support grounded frame (t = 0.28s or 1.45s)
+        const posInHalf = avatar.fbxWalkAction.time % halfCycle;
+        const restPhase = 0.28;
+        let deltaToRest = restPhase - posInHalf;
+        if (deltaToRest < -halfCycle * 0.5) deltaToRest += halfCycle;
+        if (deltaToRest > halfCycle * 0.5) deltaToRest -= halfCycle;
+
+        if (Math.abs(deltaToRest) > 0.025) {
           avatar.fbxWalkAction.paused = false;
-          avatar.fbxMixer.update(dt * 1.4);
+          const step = Math.sign(deltaToRest) * Math.min(Math.abs(deltaToRest), dt * 2.4);
+          avatar.fbxWalkAction.time = (avatar.fbxWalkAction.time + step + clipLen) % clipLen;
+          avatar.fbxMixer.update(0);
         } else {
-          avatar.fbxWalkAction.time = 0;
           avatar.fbxWalkAction.paused = true;
           avatar.fbxMixer.update(0);
         }
@@ -240,13 +259,13 @@ export function animateAvatar(avatar: AnimatedAvatar, dt: number, isMoving: bool
       targetLungeZ = 0.65 * phase;
       if (avatar.fbxMixer && avatar.fbxWalkAction) {
         avatar.fbxWalkAction.paused = false;
-        avatar.fbxMixer.update(dt * 2.2);
+        avatar.fbxMixer.update(dt * 2.4);
       }
     }
 
     avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, targetTiltX, Math.min(1, dt * 14));
     avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, targetLungeZ, Math.min(1, dt * 16));
-    avatar.body.position.y = isMoving ? 0 : Math.sin(time * 2.4) * 0.03;
+    avatar.body.position.y = activelyMoving ? 0 : Math.sin(time * 2.2) * 0.02;
     return;
   }
 
@@ -254,13 +273,14 @@ export function animateAvatar(avatar: AnimatedAvatar, dt: number, isMoving: bool
   avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, 0, Math.min(1, dt * 10));
   avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, 0, Math.min(1, dt * 12));
 
-  if (isMoving) {
-    const swing = Math.sin(time * 10.5) * 0.65;
+  if (isMoving || distanceMoved > 0.002) {
+    const freq = Math.max(6.5, Math.min(13.5, (dt > 0.0001 ? distanceMoved / dt : 6) * 1.3));
+    const swing = Math.sin(time * freq) * 0.65;
     avatar.leftLeg.rotation.x = swing;
     avatar.rightLeg.rotation.x = -swing;
     avatar.leftArm.rotation.x = -swing * 0.55;
     avatar.rightArm.rotation.x = swing * 0.55;
-    avatar.body.position.y = Math.abs(Math.sin(time * 10.5)) * 0.14;
+    avatar.body.position.y = Math.abs(Math.sin(time * freq)) * 0.14;
   } else {
     avatar.leftLeg.rotation.x = THREE.MathUtils.lerp(avatar.leftLeg.rotation.x, 0, Math.min(1, dt * 10));
     avatar.rightLeg.rotation.x = THREE.MathUtils.lerp(avatar.rightLeg.rotation.x, 0, Math.min(1, dt * 10));

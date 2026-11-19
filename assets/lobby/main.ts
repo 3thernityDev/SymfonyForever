@@ -124,7 +124,8 @@ if (panel && canvas && hiddenInput) {
     const t = clock.elapsedTime;
     if (currentAvatar) {
       currentAvatar.group.rotation.y = t * 0.65;
-      animateAvatar(currentAvatar, dt, currentAvatar.fbxRoot !== null, false, t);
+      const lobbyDist = currentAvatar.fbxRoot !== null ? dt * 3.6 : 0;
+      animateAvatar(currentAvatar, dt, currentAvatar.fbxRoot !== null, false, t, lobbyDist);
     }
     renderer.render(scene, camera);
   };

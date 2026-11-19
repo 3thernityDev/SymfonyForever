@@ -241,14 +241,20 @@ class SymfonyForeverGame {
       this.selfAvatar.group.position.set(this.controller.x, this.controller.y, this.controller.z);
       this.selfAvatar.group.rotation.y = this.controller.rotY;
       this.selfAvatar.targetRing.visible = this.targetType === 'PLAYER' && this.targetId === this.characterId;
-      animateAvatar(this.selfAvatar, dt, this.controller.isMoving, isDead, elapsed);
+      animateAvatar(this.selfAvatar, dt, this.controller.isMoving, isDead, elapsed, this.controller.lastDistanceMoved);
 
       // Interpolate remote players
       for (const [id, entry] of this.remotePlayers) {
+        const prevRx = entry.avatar.group.position.x;
+        const prevRz = entry.avatar.group.position.z;
         entry.avatar.group.position.lerp(entry.targetPos, Math.min(1, dt * 8));
+        const remoteDist = Math.hypot(
+          entry.avatar.group.position.x - prevRx,
+          entry.avatar.group.position.z - prevRz,
+        );
         entry.avatar.group.rotation.y = this.lerpAngle(entry.avatar.group.rotation.y, entry.state.rotY, Math.min(1, dt * 9));
         entry.avatar.targetRing.visible = this.targetType === 'PLAYER' && this.targetId === id;
-        animateAvatar(entry.avatar, dt, entry.state.isMoving, entry.state.isDead, elapsed + id);
+        animateAvatar(entry.avatar, dt, entry.state.isMoving || remoteDist > 0.004, entry.state.isDead, elapsed + id, remoteDist);
         this.updateNameplate(
           entry.nameplate,
           entry.avatar.group.position,
