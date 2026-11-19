@@ -79,16 +79,16 @@ final class BotProfileCatalog
     public static function rosterSlots(): array
     {
         return [
-            ['zone' => 'lagon_ouest', 'minLevel' => 1, 'maxLevel' => 2, 'class' => CharacterClass::TANK],
-            ['zone' => 'lagon_ouest', 'minLevel' => 1, 'maxLevel' => 3, 'class' => CharacterClass::DPS],
-            ['zone' => 'lagon_ouest', 'minLevel' => 2, 'maxLevel' => 3, 'class' => CharacterClass::HEAL],
-            ['zone' => 'lagon_ouest', 'minLevel' => 2, 'maxLevel' => 3, 'class' => CharacterClass::DPS],
-            ['zone' => 'salazie', 'minLevel' => 3, 'maxLevel' => 5, 'class' => CharacterClass::TANK],
-            ['zone' => 'mafate', 'minLevel' => 4, 'maxLevel' => 6, 'class' => CharacterClass::DPS],
-            ['zone' => 'cilaos', 'minLevel' => 5, 'maxLevel' => 7, 'class' => CharacterClass::HEAL],
-            ['zone' => 'sud_sauvage', 'minLevel' => 6, 'maxLevel' => 8, 'class' => CharacterClass::DPS],
-            ['zone' => 'piton_neiges', 'minLevel' => 7, 'maxLevel' => 9, 'class' => CharacterClass::TANK],
-            ['zone' => 'fournaise', 'minLevel' => 9, 'maxLevel' => 10, 'class' => CharacterClass::HEAL],
+            ['zone' => 'lagon_ouest', 'minLevel' => 1, 'maxLevel' => 3, 'class' => CharacterClass::TANK],
+            ['zone' => 'lagon_ouest', 'minLevel' => 2, 'maxLevel' => 5, 'class' => CharacterClass::DPS],
+            ['zone' => 'lagon_ouest', 'minLevel' => 4, 'maxLevel' => 7, 'class' => CharacterClass::HEAL],
+            ['zone' => 'lagon_ouest', 'minLevel' => 6, 'maxLevel' => 9, 'class' => CharacterClass::DPS],
+            ['zone' => 'salazie', 'minLevel' => 11, 'maxLevel' => 16, 'class' => CharacterClass::TANK],
+            ['zone' => 'mafate', 'minLevel' => 20, 'maxLevel' => 25, 'class' => CharacterClass::DPS],
+            ['zone' => 'cilaos', 'minLevel' => 29, 'maxLevel' => 34, 'class' => CharacterClass::HEAL],
+            ['zone' => 'sud_sauvage', 'minLevel' => 38, 'maxLevel' => 43, 'class' => CharacterClass::DPS],
+            ['zone' => 'piton_neiges', 'minLevel' => 47, 'maxLevel' => 52, 'class' => CharacterClass::TANK],
+            ['zone' => 'fournaise', 'minLevel' => 56, 'maxLevel' => 60, 'class' => CharacterClass::HEAL],
         ];
     }
 
@@ -124,7 +124,7 @@ final class BotProfileCatalog
             'Je cherche un Healer ou un DPS motivé pour avancer dans les cirques.',
             'Ça xp tranquille aujourd\'hui sur l\'île, bonne chasse à tous !',
             'Salut la team ! Besoin d\'un coup de main quelque part ?',
-            'Gaffe au Seigneur du Dolomieu, il pardonne pas si on est pas niv. 10 en Tank !',
+            'Gaffe au Seigneur du Dolomieu, il pardonne pas si on est pas niv. 60 en Tank !',
             'J\'adore l\'ambiance entre Saint-Gilles et Cilaos, bon jeu à vous !',
             'Si quelqu\'un veut quêter ensemble, hésitez pas à m\'inviter !',
             'Pensez à réparer et acheter des tisanes au campement avant de monter vers le Piton.',
@@ -140,35 +140,35 @@ final class BotProfileCatalog
             'lagon_ouest' => [
                 'Les Crabes de Récif sont parfaits pour chauffer l\'auto-attaque !',
                 'Salut Saint-Gilles ! Quelqu\'un vient de débarquer sur le lagon ?',
-                'Je finis deux tangues et je file parler au capitaine.',
-                'Bonne ambiance au camp de l\'Ermitage !',
+                'J\'ai croisé un Endormi de Bourbon près des filaos !',
+                'Les Paille-en-Queue tournent déjà au-dessus de l\'Ermitage.',
             ],
             'salazie' => [
-                'Les sangliers de Salazie donnent bien de l\'XP.',
-                'Super vert ici près des cascades !',
+                'Les Tec-Tec et les sangliers de Salazie donnent bien de l\'XP.',
+                'Un Oiseau Blanc de Bourbon vient de passer dans la brume !',
                 'Quelqu\'un pour chasser les Papangues ensemble ?',
             ],
             'mafate' => [
-                'Les remparts de Mafate sont raides mais les Golems rapportent gros !',
-                'On respire le grand air des îlets ici.',
+                'Les Tuit-Tuit chantent près des remparts mais les Bibes Géantes mordent fort !',
+                'J\'ai aperçu un Gecko Vert de Bourbon sur les rochers.',
                 'Faites gaffe aux Golems de Schiste, ils ont pas mal d\'armure.',
             ],
             'cilaos' => [
                 'Rien de tel qu\'une petite halte aux thermes de Cilaos.',
-                'Les Cerfs de Java bougent vite par ici !',
+                'Les Cerfs de Java et les Merles Péi bougent vite par ici !',
                 'Je garde mon mana prêt pour soigner si besoin.',
             ],
             'sud_sauvage' => [
-                'Les Lézards d\'Obsidienne ont du répondant sur les falaises !',
-                'Le Sud Sauvage porte bien son nom aujourd\'hui.',
+                'Les Tortues Géantes de Bourbon encaissent vraiment dur !',
+                'Attention aux Scolopendres et aux Geckos de Manapany sur la côte.',
             ],
             'piton_neiges' => [
-                'Ça caille un peu au sommet du Piton des Neiges !',
+                'Les Pétrels de Barau et Papillons La Pâture volent haut autour du sommet !',
                 'Attention au Colosse des Nuages, c\'est un élite costaud.',
             ],
             'fournaise' => [
-                'Quelle chaleur au Cratère Dolomieu ! Restez groupés.',
-                'Ne tentez pas le Seigneur du Dolomieu en solo, c\'est mortel direct !',
+                'Entre les Roussettes Noires et les Solitaires de La Réunion, ça tape fort !',
+                'Ne tentez pas le Seigneur du Dolomieu (Niv. 65) en solo, c\'est mortel direct !',
                 'Prêt pour le raid World Boss dès qu\'on est assez nombreux !',
             ],
             default => [
@@ -253,7 +253,7 @@ final class BotProfileCatalog
         ])) {
             if (str_contains($norm, 'dolomieu') || str_contains($norm, 'boss') || str_contains($norm, 'raid')) {
                 $options = [
-                    'Pour le Dolomieu faut un bon Tank niv. 10 et du Heal, je suis chaud !',
+                    'Pour le Dolomieu faut un bon Tank niv. 60 et du Heal, je suis chaud !',
                     'Je suis partant pour le World Boss si on monte un gros groupe !',
                     sprintf('En tant que %s, je peux aider si on s\'organise bien !', $botClass->label()),
                 ];

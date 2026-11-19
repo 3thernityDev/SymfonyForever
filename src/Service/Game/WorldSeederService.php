@@ -8,6 +8,7 @@ use App\Entity\Character;
 use App\Entity\MonsterInstance;
 use App\Entity\MonsterTemplate;
 use App\Entity\Zone;
+use App\Game\MonsterScaling;
 use App\Game\NpcRegistry;
 use App\Game\WorldCatalog;
 use App\Repository\MonsterInstanceRepository;
@@ -55,41 +56,57 @@ final class WorldSeederService
             ++$zonesCount;
         }
 
-        // 2. Seed Réunion-inspired bestiary templates
+        // 2. Seed Réunion endemic & emblematic bestiary templates (Levels 1–60 + Lv 65 World Boss)
         $templateSpecs = [
-            // Lagon de l'Ouest (Niv 1-3, non-agressifs près du hub — ~30s à l'auto-attaque, 3-4 skills max)
-            ['crabe_recif', 'Crabe de Récif', 1, 200, 10, 5, 42, 10.0, 5.5, 7.5, 2.2, 18, false, false, false, 'crab', '#ef4444', 1.0],
-            ['tangue_sauvage', 'Tangue Épineux', 2, 290, 14, 8, 65, 11.0, 5.5, 8.5, 2.0, 20, false, false, false, 'tangue', '#a16207', 1.05],
-            ['guepe_cotiere', 'Guêpe des Filaos', 3, 390, 18, 8, 88, 12.0, 6.0, 9.5, 1.8, 22, true, false, false, 'wasp', '#eab308', 1.0],
+            // Lagon de l'Ouest (Niv 1-10)
+            ['crabe_recif', 'Crabe de Récif', 1, MonsterScaling::ARCHETYPE_BALANCED, 10.0, 5.5, 7.5, 2.2, 18, false, false, false, 'crab', '#ef4444', 1.0],
+            ['tangue_sauvage', 'Tangue Épineux', 3, MonsterScaling::ARCHETYPE_BALANCED, 11.0, 5.5, 8.5, 2.0, 20, false, false, false, 'tangue', '#a16207', 1.05],
+            ['guepe_cotiere', 'Guêpe des Filaos', 5, MonsterScaling::ARCHETYPE_AGILE, 12.0, 6.0, 9.5, 1.8, 22, true, false, false, 'wasp', '#eab308', 1.0],
+            ['endormi_bourbon', 'Endormi de Bourbon', 7, MonsterScaling::ARCHETYPE_ARMORED, 12.5, 6.0, 8.0, 2.1, 22, true, false, false, 'chameleon', '#10b981', 1.15],
+            ['paille_en_queue', 'Paille-en-Queue Furieux', 9, MonsterScaling::ARCHETYPE_AGILE, 14.0, 6.5, 11.0, 1.8, 24, true, false, false, 'tropicbird', '#f8fafc', 1.2],
 
-            // Cirque de Salazie (Niv 3-5)
-            ['sanglier_salazie', 'Sanglier de Salazie', 4, 520, 24, 14, 135, 13.0, 5.5, 9.5, 2.0, 24, true, false, false, 'boar', '#78350f', 1.15],
-            ['papangue_feroce', 'Papangue Féroce', 5, 650, 30, 14, 175, 15.0, 6.5, 11.0, 1.8, 25, true, false, false, 'bird', '#3f3f46', 1.2],
+            // Cirque de Salazie (Niv 10-18)
+            ['tec_tec_foret', 'Tec-Tec des Cascades', 11, MonsterScaling::ARCHETYPE_AGILE, 13.0, 6.0, 10.5, 1.75, 22, true, false, false, 'songbird', '#f97316', 1.05],
+            ['sanglier_salazie', 'Sanglier de Salazie', 13, MonsterScaling::ARCHETYPE_BRUISER, 13.5, 5.5, 9.5, 2.0, 24, true, false, false, 'boar', '#78350f', 1.18],
+            ['zoizo_lunettes', 'Oiseau Blanc de Bourbon', 15, MonsterScaling::ARCHETYPE_AGILE, 14.0, 6.0, 11.0, 1.8, 24, true, false, false, 'songbird', '#cbd5e1', 1.1],
+            ['papangue_feroce', 'Papangue Féroce', 17, MonsterScaling::ARCHETYPE_AGILE, 15.0, 6.5, 11.5, 1.8, 25, true, false, false, 'bird', '#3f3f46', 1.25],
 
-            // Cirque de Mafate (Niv 4-6)
-            ['golem_schiste', 'Golem de Schiste', 6, 820, 35, 22, 235, 14.0, 6.5, 8.0, 2.3, 28, true, false, false, 'golem', '#64748b', 1.35],
+            // Cirque de Mafate (Niv 18-27)
+            ['tuit_tuit', 'Tuit-Tuit des Remparts', 19, MonsterScaling::ARCHETYPE_AGILE, 14.5, 6.5, 11.0, 1.8, 25, true, false, false, 'songbird', '#94a3b8', 1.15],
+            ['gecko_bourbon', 'Gecko Vert de Bourbon', 22, MonsterScaling::ARCHETYPE_AGILE, 14.0, 6.0, 10.5, 1.85, 26, true, false, false, 'gecko', '#22c55e', 1.2],
+            ['golem_schiste', 'Golem de Schiste', 25, MonsterScaling::ARCHETYPE_ARMORED, 14.5, 6.5, 8.2, 2.3, 28, true, false, false, 'golem', '#64748b', 1.35],
+            ['bibe_mafate', 'Bibe Géante de Mafate', 27, MonsterScaling::ARCHETYPE_BRUISER, 15.0, 6.5, 10.0, 1.85, 28, true, false, false, 'spider', '#facc15', 1.3],
 
-            // Cirque de Cilaos (Niv 5-7)
-            ['cerf_java', 'Cerf de Java Enragé', 6, 780, 38, 18, 245, 15.0, 6.0, 11.5, 1.9, 26, true, false, false, 'stag', '#92400e', 1.25],
-            ['gardien_cilaos', 'Sentinelle des Thermes', 7, 1020, 44, 24, 310, 14.0, 6.5, 9.0, 2.1, 30, true, false, false, 'golem', '#0284c7', 1.4],
+            // Cirque de Cilaos (Niv 27-36)
+            ['oiseau_vert_cilaos', 'Oiseau Lunettes Vert', 29, MonsterScaling::ARCHETYPE_AGILE, 14.5, 6.0, 11.0, 1.8, 26, true, false, false, 'songbird', '#65a30d', 1.15],
+            ['cerf_java', 'Cerf de Java Enragé', 31, MonsterScaling::ARCHETYPE_BRUISER, 15.0, 6.0, 11.5, 1.9, 26, true, false, false, 'stag', '#92400e', 1.28],
+            ['merle_peyi', 'Merle Péi des Thermes', 33, MonsterScaling::ARCHETYPE_AGILE, 15.0, 6.5, 11.5, 1.8, 28, true, false, false, 'bird', '#475569', 1.25],
+            ['gardien_cilaos', 'Sentinelle des Thermes', 36, MonsterScaling::ARCHETYPE_ARMORED, 14.5, 6.5, 9.0, 2.1, 30, true, false, false, 'golem', '#0284c7', 1.4],
 
-            // Sud Sauvage (Niv 6-8)
-            ['lezard_obsidienne', 'Lézard d\'Obsidienne', 7, 980, 48, 24, 325, 15.0, 6.0, 10.5, 1.8, 26, true, false, false, 'lizard', '#1e293b', 1.3],
+            // Sud Sauvage (Niv 36-45)
+            ['gecko_manapany', 'Gecko Vert de Manapany', 38, MonsterScaling::ARCHETYPE_AGILE, 15.0, 6.0, 11.0, 1.8, 26, true, false, false, 'gecko', '#16a34a', 1.25],
+            ['tortue_bourbon', 'Tortue Géante de Bourbon', 40, MonsterScaling::ARCHETYPE_ARMORED, 14.0, 6.0, 7.2, 2.3, 30, true, false, false, 'tortoise', '#57534e', 1.45],
+            ['lezard_obsidienne', 'Lézard d\'Obsidienne', 42, MonsterScaling::ARCHETYPE_BRUISER, 15.5, 6.0, 10.5, 1.8, 28, true, false, false, 'lizard', '#1e293b', 1.32],
+            ['scolopendre_basalte', 'Scolopendre du Grand Brûlé', 45, MonsterScaling::ARCHETYPE_BRUISER, 16.0, 6.5, 10.5, 1.75, 30, true, false, false, 'centipede', '#991b1b', 1.35],
 
-            // Piton des Neiges (Niv 7-9)
-            ['colosse_nuages', 'Colosse des Nuages (Élite)', 9, 3200, 68, 34, 620, 17.0, 7.5, 9.5, 2.0, 40, true, true, false, 'golem', '#cbd5e1', 1.85],
+            // Piton des Neiges (Niv 45-54)
+            ['petrel_barau', 'Pétrel de Barau', 47, MonsterScaling::ARCHETYPE_AGILE, 16.0, 6.5, 12.0, 1.8, 28, true, false, false, 'tropicbird', '#334155', 1.3],
+            ['petrel_noir', 'Pétrel Noir de Bourbon', 50, MonsterScaling::ARCHETYPE_AGILE, 16.5, 6.5, 12.0, 1.75, 30, true, false, false, 'bird', '#18181b', 1.35],
+            ['papillon_salazie', 'Papillon La Pâture', 52, MonsterScaling::ARCHETYPE_AGILE, 15.5, 6.5, 11.5, 1.8, 30, true, false, false, 'butterfly', '#06b6d4', 1.35],
+            ['colosse_nuages', 'Colosse des Nuages (Élite)', 54, MonsterScaling::ARCHETYPE_ELITE, 17.5, 7.5, 9.5, 2.0, 42, true, true, false, 'golem', '#cbd5e1', 1.85],
 
-            // Piton de la Fournaise (Niv 8-10 + World Boss 10 Joueurs)
-            ['molosse_magma', 'Molosse de Magma', 8, 1220, 58, 28, 440, 16.0, 6.5, 10.5, 1.9, 30, true, false, false, 'hound', '#ea580c', 1.35],
-            ['seigneur_dolomieu', 'Seigneur du Dolomieu (World Boss)', 10, 28000, 550, 68, 5000, 28.0, 12.5, 9.5, 1.8, 180, true, true, true, 'boss_volcano', '#dc2626', 3.8],
+            // Piton de la Fournaise (Niv 53-60 + World Boss Niv 65)
+            ['roussette_bourbon', 'Roussette Noire de Bourbon', 55, MonsterScaling::ARCHETYPE_AGILE, 16.5, 6.5, 11.5, 1.8, 30, true, false, false, 'bat', '#27272a', 1.35],
+            ['ibis_reunion', 'Solitaire de La Réunion', 57, MonsterScaling::ARCHETYPE_BRUISER, 16.5, 6.5, 10.5, 1.85, 30, true, false, false, 'ibis', '#e2e8f0', 1.4],
+            ['molosse_magma', 'Molosse de Magma', 59, MonsterScaling::ARCHETYPE_BRUISER, 17.0, 6.5, 10.5, 1.9, 32, true, false, false, 'hound', '#ea580c', 1.38],
+            ['chouette_bourbon', 'Petit-Duc de Bourbon', 60, MonsterScaling::ARCHETYPE_BALANCED, 17.5, 7.0, 11.5, 1.85, 34, true, false, false, 'bird', '#7c2d12', 1.45],
+            ['seigneur_dolomieu', 'Seigneur du Dolomieu (World Boss)', 65, MonsterScaling::ARCHETYPE_WORLD_BOSS, 28.0, 12.5, 9.5, 1.8, 180, true, true, true, 'boss_volcano', '#dc2626', 3.8],
         ];
 
         $templates = [];
         foreach ($templateSpecs as $spec) {
-            if (count($spec) === 17) {
-                array_splice($spec, 14, 0, [false]);
-            }
-            [$code, $name, $lvl, $hp, $atk, $def, $xp, $aggro, $range, $speed, $interval, $respawn, $aggressive, $isBoss, $isWorldBoss, $mesh, $color, $scale] = $spec;
+            [$code, $name, $lvl, $archetype, $aggro, $range, $speed, $interval, $respawn, $aggressive, $isBoss, $isWorldBoss, $mesh, $color, $scale] = $spec;
+            $scaled = MonsterScaling::computeStats($lvl, $archetype);
             $tpl = $this->templateRepository->findOneByCode($code);
             if (!$tpl instanceof MonsterTemplate) {
                 $tpl = new MonsterTemplate($code, $name);
@@ -97,10 +114,10 @@ final class WorldSeederService
             }
             $tpl->setName($name)
                 ->setLevel($lvl)
-                ->setMaxHp($hp)
-                ->setAttack($atk)
-                ->setDefense($def)
-                ->setXpReward($xp)
+                ->setMaxHp($scaled['maxHp'])
+                ->setAttack($scaled['attack'])
+                ->setDefense($scaled['defense'])
+                ->setXpReward($scaled['xpReward'])
                 ->setAggroRadius($aggro)
                 ->setAttackRange($range)
                 ->setMoveSpeed($speed)
@@ -116,7 +133,7 @@ final class WorldSeederService
         }
         $this->em->flush();
 
-        // 3. Detect legacy 2048-scale or sparse monster seed so existing worlds upgrade cleanly
+        // 3. Detect legacy 2048-scale, sparse seed, or outdated bestiary so existing worlds upgrade cleanly
         $existingCount = $this->instanceRepository->count([]);
         if ($existingCount > 0 && !$resetMonsters) {
             $legacyScaleReset = false;
@@ -126,6 +143,9 @@ final class WorldSeederService
                     break;
                 }
             }
+
+            $distinctTemplates = (int) $this->em->createQuery('SELECT COUNT(DISTINCT m.template) FROM App\Entity\MonsterInstance m')
+                ->getSingleScalarResult();
 
             if ($legacyScaleReset) {
                 $resetMonsters = true;
@@ -141,9 +161,12 @@ final class WorldSeederService
                         ->setPosY($safe['y'])
                         ->setPosZ($safe['z']);
                 }
-            } elseif ($existingCount < 250) {
-                // Upgrade earlier sparse monster seed to full island-wide density while keeping players in place
+            } elseif ($existingCount < 250 || $distinctTemplates < count($templates)) {
+                // Upgrade earlier sparse/old bestiary seed to full 1-60 island fauna while keeping human players in place
                 $resetMonsters = true;
+                if ($distinctTemplates < count($templates)) {
+                    $this->em->createQuery('DELETE FROM App\Entity\Character c WHERE c.isBot = true')->execute();
+                }
             }
         }
 
@@ -154,59 +177,66 @@ final class WorldSeederService
 
         $spawned = 0;
         if ($existingCount === 0) {
-            // [templateCode, zoneCode, x, z]: curated quest hubs & bosses + procedural island-wide density
+            // [templateCode, zoneCode, x, z]: curated quest hubs & endemic fauna clusters + procedural island-wide density
             $spawns = [
-                // Lagon de l'Ouest starter & quest spots around Saint-Gilles
+                // Lagon de l'Ouest (Niv 1-10): calm passive starter camp + endemic coastal wildlife
                 ['crabe_recif', 'lagon_ouest', -1995.0, -305.0],
                 ['crabe_recif', 'lagon_ouest', -1975.0, -345.0],
                 ['crabe_recif', 'lagon_ouest', -2105.0, -265.0],
                 ['crabe_recif', 'lagon_ouest', -2015.0, -250.0],
                 ['crabe_recif', 'lagon_ouest', -1945.0, -315.0],
                 ['crabe_recif', 'lagon_ouest', -1985.0, -220.0],
-                ['crabe_recif', 'lagon_ouest', -1925.0, -395.0],
-                ['crabe_recif', 'lagon_ouest', -2085.0, -210.0],
                 ['tangue_sauvage', 'lagon_ouest', -1890.0, -310.0],
                 ['tangue_sauvage', 'lagon_ouest', -1855.0, -375.0],
                 ['tangue_sauvage', 'lagon_ouest', -1895.0, -445.0],
-                ['tangue_sauvage', 'lagon_ouest', -1935.0, -185.0],
-                ['tangue_sauvage', 'lagon_ouest', -1805.0, -255.0],
-                ['tangue_sauvage', 'lagon_ouest', -1775.0, -390.0],
+                ['guepe_cotiere', 'lagon_ouest', -1790.0, -265.0],
+                ['endormi_bourbon', 'lagon_ouest', -1740.0, -420.0],
+                ['paille_en_queue', 'lagon_ouest', -1760.0, -140.0],
 
-                // Cirque de Salazie quest cluster
+                // Cirque de Salazie (Niv 10-18)
+                ['tec_tec_foret', 'salazie', 255.0, -920.0],
                 ['sanglier_salazie', 'salazie', 250.0, -960.0],
                 ['sanglier_salazie', 'salazie', 390.0, -1080.0],
-                ['sanglier_salazie', 'salazie', 340.0, -1120.0],
+                ['zoizo_lunettes', 'salazie', 435.0, -1010.0],
                 ['papangue_feroce', 'salazie', 190.0, -860.0],
 
-                // Cirque de Mafate quest cluster
+                // Cirque de Mafate (Niv 18-27)
+                ['tuit_tuit', 'mafate', -965.0, -790.0],
+                ['gecko_bourbon', 'mafate', -820.0, -750.0],
                 ['golem_schiste', 'mafate', -910.0, -870.0],
                 ['golem_schiste', 'mafate', -800.0, -920.0],
-                ['papangue_feroce', 'mafate', -1020.0, -770.0],
+                ['bibe_mafate', 'mafate', -1020.0, -770.0],
 
-                // Cirque de Cilaos quest cluster
+                // Cirque de Cilaos (Niv 27-36)
+                ['oiseau_vert_cilaos', 'cilaos', -560.0, 470.0],
                 ['cerf_java', 'cilaos', -525.0, 540.0],
                 ['cerf_java', 'cilaos', -390.0, 620.0],
+                ['merle_peyi', 'cilaos', -365.0, 440.0],
                 ['gardien_cilaos', 'cilaos', -495.0, 380.0],
 
-                // Sud Sauvage quest cluster
+                // Sud Sauvage (Niv 36-45)
+                ['gecko_manapany', 'sud_sauvage', 465.0, 1650.0],
+                ['tortue_bourbon', 'sud_sauvage', 595.0, 1785.0],
                 ['lezard_obsidienne', 'sud_sauvage', 665.0, 1790.0],
                 ['lezard_obsidienne', 'sud_sauvage', 505.0, 1705.0],
-                ['lezard_obsidienne', 'sud_sauvage', 765.0, 1735.0],
+                ['scolopendre_basalte', 'sud_sauvage', 765.0, 1735.0],
 
-                // Piton des Neiges high massif & summit elite guards
+                // Piton des Neiges (Niv 45-54)
+                ['petrel_barau', 'piton_neiges', -325.0, -85.0],
+                ['petrel_barau', 'piton_neiges', -115.0, -145.0],
+                ['petrel_noir', 'piton_neiges', -160.0, -320.0],
+                ['petrel_noir', 'piton_neiges', -285.0, -385.0],
+                ['papillon_salazie', 'piton_neiges', -410.0, -205.0],
+                ['papillon_salazie', 'piton_neiges', -175.0, -195.0],
                 ['colosse_nuages', 'piton_neiges', -262.5, -227.5],
                 ['colosse_nuages', 'piton_neiges', -340.0, -295.0],
-                ['colosse_nuages', 'piton_neiges', -175.0, -195.0],
-                ['gardien_cilaos', 'piton_neiges', -325.0, -85.0],
-                ['gardien_cilaos', 'piton_neiges', -160.0, -320.0],
-                ['gardien_cilaos', 'piton_neiges', -410.0, -205.0],
-                ['gardien_cilaos', 'piton_neiges', -115.0, -145.0],
-                ['gardien_cilaos', 'piton_neiges', -285.0, -385.0],
 
-                // Plaine des Sables & Cratère Dolomieu World Boss
+                // Piton de la Fournaise (Niv 53-60 + World Boss Niv 65)
+                ['roussette_bourbon', 'fournaise', 990.0, 790.0],
+                ['ibis_reunion', 'fournaise', 1110.0, 745.0],
                 ['molosse_magma', 'fournaise', 1180.0, 845.0],
                 ['molosse_magma', 'fournaise', 1030.0, 820.0],
-                ['molosse_magma', 'fournaise', 1320.0, 935.0],
+                ['chouette_bourbon', 'fournaise', 1320.0, 935.0],
                 // WORLD BOSS au cœur du Cratère Dolomieu!
                 ['seigneur_dolomieu', 'fournaise', 1540.0, 962.5],
             ];
@@ -314,23 +344,61 @@ final class WorldSeederService
                 $tplCode = match ($zoneCode) {
                     'lagon_ouest' => (static function () use ($cx, $cz, $lagon, $roll): string {
                         $d = hypot($cx - $lagon['respawnX'], $cz - $lagon['respawnZ']);
-                        if ($d < 260.0) {
-                            return 'crabe_recif';
+                        if ($d < 220.0) {
+                            return $roll < 0.65 ? 'crabe_recif' : 'tangue_sauvage';
                         }
-                        if ($d < 620.0) {
-                            return $roll < 0.72 ? 'tangue_sauvage' : 'crabe_recif';
+                        if ($d < 520.0) {
+                            return match (true) {
+                                $roll < 0.30 => 'crabe_recif',
+                                $roll < 0.65 => 'tangue_sauvage',
+                                default => 'guepe_cotiere',
+                            };
                         }
 
-                        return $roll < 0.78 ? 'guepe_cotiere' : 'tangue_sauvage';
+                        return match (true) {
+                            $roll < 0.25 => 'tangue_sauvage',
+                            $roll < 0.50 => 'guepe_cotiere',
+                            $roll < 0.78 => 'endormi_bourbon',
+                            default => 'paille_en_queue',
+                        };
                     })(),
-                    'salazie' => $roll < 0.55 ? 'sanglier_salazie' : 'papangue_feroce',
-                    'mafate' => $roll < 0.60 ? 'golem_schiste' : 'papangue_feroce',
-                    'cilaos' => $roll < 0.55 ? 'cerf_java' : 'gardien_cilaos',
-                    'sud_sauvage' => 'lezard_obsidienne',
-                    'piton_neiges' => hypot($cx - $piton['centerX'], $cz - $piton['centerZ']) < 240.0 && $roll < 0.25
+                    'salazie' => match (true) {
+                        $roll < 0.25 => 'tec_tec_foret',
+                        $roll < 0.55 => 'sanglier_salazie',
+                        $roll < 0.80 => 'zoizo_lunettes',
+                        default => 'papangue_feroce',
+                    },
+                    'mafate' => match (true) {
+                        $roll < 0.24 => 'tuit_tuit',
+                        $roll < 0.50 => 'gecko_bourbon',
+                        $roll < 0.78 => 'golem_schiste',
+                        default => 'bibe_mafate',
+                    },
+                    'cilaos' => match (true) {
+                        $roll < 0.22 => 'oiseau_vert_cilaos',
+                        $roll < 0.50 => 'cerf_java',
+                        $roll < 0.76 => 'merle_peyi',
+                        default => 'gardien_cilaos',
+                    },
+                    'sud_sauvage' => match (true) {
+                        $roll < 0.25 => 'gecko_manapany',
+                        $roll < 0.52 => 'tortue_bourbon',
+                        $roll < 0.78 => 'lezard_obsidienne',
+                        default => 'scolopendre_basalte',
+                    },
+                    'piton_neiges' => hypot($cx - $piton['centerX'], $cz - $piton['centerZ']) < 240.0 && $roll < 0.22
                         ? 'colosse_nuages'
-                        : 'gardien_cilaos',
-                    'fournaise' => 'molosse_magma',
+                        : match (true) {
+                            $roll < 0.36 => 'petrel_barau',
+                            $roll < 0.70 => 'petrel_noir',
+                            default => 'papillon_salazie',
+                        },
+                    'fournaise' => match (true) {
+                        $roll < 0.26 => 'roussette_bourbon',
+                        $roll < 0.52 => 'ibis_reunion',
+                        $roll < 0.78 => 'molosse_magma',
+                        default => 'chouette_bourbon',
+                    },
                     default => 'tangue_sauvage',
                 };
 

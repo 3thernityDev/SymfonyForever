@@ -247,7 +247,7 @@ final class CombatService
         };
         $levelScale = 1.0 + ($lvl - 1) * 0.13;
         if ($monster->getTemplate()->isWorldBoss()) {
-            $levelScale = min(1.65, $levelScale);
+            $levelScale = min(6.5, $levelScale);
         }
 
         $raw = (2.0 + $primary * $aaMult) * $levelScale;
@@ -527,7 +527,7 @@ final class CombatService
 
         $levelScale = 1.0 + ($caster->getLevel() - 1) * 0.13;
         if ($monster->getTemplate()->isWorldBoss()) {
-            $levelScale = min(1.65, $levelScale);
+            $levelScale = min(6.5, $levelScale);
         }
         $rank = $caster->getSkillLevel($skill->code);
         $rankMult = LevelingService::skillPowerMultiplier($rank);

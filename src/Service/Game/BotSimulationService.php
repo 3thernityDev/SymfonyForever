@@ -1016,7 +1016,7 @@ final class BotSimulationService
         };
 
         $step = 0;
-        while ($bot->getStatPoints() > 0 && $step < 60) {
+        while ($bot->getStatPoints() > 0 && $step < 240) {
             $stat = $statCycle[$step % count($statCycle)];
             if (!$this->levelingService->allocateStat($bot, $stat)) {
                 break;
@@ -1032,7 +1032,7 @@ final class BotSimulationService
             };
 
             $guard = 0;
-            while ($bot->getSkillPoints() > 0 && $guard < 12) {
+            while ($bot->getSkillPoints() > 0 && $guard < 24) {
                 ++$guard;
                 $upgraded = false;
                 foreach ($skillOrder as $code) {

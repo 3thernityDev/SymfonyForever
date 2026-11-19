@@ -612,7 +612,7 @@ class SymfonyForeverGame {
         if (this.worldBossState.state === 'DEAD') {
           this.showToast(`World Boss vaincu ! Réapparition dans ${Math.ceil(this.worldBossState.respawnRemaining)}s au Cratère Dolomieu.`);
         } else {
-          this.showToast(`🌋 ${this.worldBossState.name} (28 000 PV) attend au Piton de la Fournaise ! Alliez-vous jusqu'à 10 joueurs pour un Légendaire garanti.`);
+          this.showToast(`🌋 ${this.worldBossState.name} (${this.worldBossState.maxHp.toLocaleString('fr-FR')} PV · Niv. ${this.worldBossState.level}) attend au Piton de la Fournaise ! Alliez-vous jusqu'à 10 joueurs pour un Légendaire garanti.`);
         }
       }
     });
@@ -2546,7 +2546,7 @@ class SymfonyForeverGame {
     const alliesEl = document.getElementById('wb-allies');
     const capEl = document.getElementById('wb-carapace');
 
-    if (nameEl) nameEl.textContent = wb.name;
+    if (nameEl) nameEl.textContent = `${wb.name} · Niv. ${wb.level}`;
     if (fillEl) fillEl.style.width = `${pct.toFixed(1)}%`;
     if (txtEl) txtEl.textContent = `${wb.hp.toLocaleString('fr-FR')} / ${wb.maxHp.toLocaleString('fr-FR')} (${Math.round(pct)}%)`;
 

@@ -9,7 +9,7 @@ use App\Game\SkillRegistry;
 
 final class LevelingService
 {
-    public const int MAX_LEVEL = 20;
+    public const int MAX_LEVEL = 60;
     public const int FREE_STAT_POINTS_PER_LEVEL = 3;
     public const int SKILL_POINT_INTERVAL = 3;
     public const int MAX_SKILL_RANK = 5;

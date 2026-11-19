@@ -456,7 +456,7 @@ final class WorldSimulationService
     ): void {
         $template = $monster->getTemplate();
         $monster->setLastSpecialAt($now);
-        $rawBase = $monster->getPhase() >= 2 ? 175.0 : 135.0;
+        $rawBase = $template->getAttack() * ($monster->getPhase() >= 2 ? 0.72 : 0.55);
 
         foreach ($playersById as $player) {
             if ($player->isDead()) {
@@ -513,8 +513,9 @@ final class WorldSimulationService
         $stats = $this->statCalculator->compute($target, $now);
 
         if ($template->isWorldBoss()) {
-            if ($target->getCharacterClass() !== CharacterClass::TANK || $target->getLevel() < 10) {
-                // Guaranteed ONE-SHOT on non-Tank or sub-level 10 characters!
+            $minTankLevel = max(1, $template->getLevel() - 5);
+            if ($target->getCharacterClass() !== CharacterClass::TANK || $target->getLevel() < $minTankLevel) {
+                // Guaranteed ONE-SHOT on non-Tank or under-leveled characters!
                 $dmg = max($stats['maxHp'] + 250, (int) round($stats['maxHp'] * 1.35));
             } else {
                 // Level 10+ Tank tanks at most 3 hits unbuffed/unhealed (36.5%-39% maxHp per swing)

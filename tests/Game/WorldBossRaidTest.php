@@ -65,9 +65,10 @@ final class WorldBossRaidTest extends KernelTestCase
         self::assertCount(1, $bosses);
         $boss = $bosses[0];
         self::assertSame('seigneur_dolomieu', $boss->getTemplate()->getCode());
-        self::assertSame(28000, $boss->getTemplate()->getMaxHp());
+        self::assertSame(65, $boss->getTemplate()->getLevel());
+        self::assertSame(440000, $boss->getTemplate()->getMaxHp());
 
-        $solo = $this->createLevel10Hero('solo_user', 'SoloDps', CharacterClass::DPS, $boss->getPosX() + 4.0, $boss->getPosY(), $boss->getPosZ(), $now);
+        $solo = $this->createLevel60Hero('solo_user', 'SoloDps', CharacterClass::DPS, $boss->getPosX() + 4.0, $boss->getPosY(), $boss->getPosZ(), $now);
         $this->em->flush();
 
         // Solo player hits the World Boss and fights over 14 seconds of ticks
@@ -84,7 +85,7 @@ final class WorldBossRaidTest extends KernelTestCase
 
         // Solo player MUST be defeated and World Boss remains near full HP thanks to Carapace Magmatique!
         self::assertTrue($solo->isDead(), 'Un joueur seul doit être vaincu par le World Boss.');
-        self::assertGreaterThan(25000, $boss->getCurrentHp(), 'La Carapace Magmatique doit empêcher un joueur solo de descendre le World Boss.');
+        self::assertGreaterThan(400000, $boss->getCurrentHp(), 'La Carapace Magmatique doit empêcher un joueur solo de descendre le World Boss.');
         self::assertNotSame(MonsterInstance::STATE_DEAD, $boss->getState());
     }
 
@@ -111,7 +112,7 @@ final class WorldBossRaidTest extends KernelTestCase
         foreach ($roster as $idx => [$name, $cls]) {
             $angle = ($idx / 10) * M_PI * 2.0;
             $dist = $cls === CharacterClass::HEAL ? 14.0 : 5.0;
-            $heroes[$name] = $this->createLevel10Hero(
+            $heroes[$name] = $this->createLevel60Hero(
                 'raid_u_'.$idx,
                 $name,
                 $cls,
@@ -150,7 +151,7 @@ final class WorldBossRaidTest extends KernelTestCase
         self::assertSame(10, $boss->getRaidContributorCount(), 'Les 10 alliés (y compris les 2 Healers) doivent être enregistrés comme participants.');
 
         // Drop boss below 50% HP and tick -> triggers Phase 2 Fureur Magmatique!
-        $boss->setCurrentHp(13500);
+        $boss->setCurrentHp(215000);
         $this->em->flush();
         $this->sim->maybeTickZone('fournaise', $t + 4.0);
         self::assertSame(2, $boss->getPhase(), 'Sous 50% PV, le World Boss doit passer en Phase 2.');
@@ -216,44 +217,47 @@ final class WorldBossRaidTest extends KernelTestCase
         self::assertStringContainsString('10 héros', $joined);
     }
 
-    public function testWorldBossOneShotsNonTankOrSubLevel10AndKillsUnbuffedLevel10TankInThreeHitsMax(): void
+    public function testWorldBossOneShotsNonTankOrSubLevel60AndKillsUnbuffedLevel60TankInThreeHitsMax(): void
     {
         $boss = $this->monsterRepo->findWorldBosses()[0];
         $simRef = new \ReflectionMethod(WorldSimulationService::class, 'performMonsterAttack');
         $events = [];
 
-        // 1. Level 10 DPS, Level 10 Heal, and Level 9 Tank must ALL get ONE-SHOT in 1 swing!
-        $lvl10Dps = $this->createLevel10Hero('os_dps', 'OneShotDps', CharacterClass::DPS, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30000.0);
-        $lvl10Heal = $this->createLevel10Hero('os_heal', 'OneShotHeal', CharacterClass::HEAL, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30000.0);
+        // 1. Level 60 DPS, Level 60 Heal, and Level 59 Tank must ALL get ONE-SHOT in 1 swing!
+        $lvl60Dps = $this->createLevel60Hero('os_dps', 'OneShotDps', CharacterClass::DPS, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30000.0);
+        $lvl60Heal = $this->createLevel60Hero('os_heal', 'OneShotHeal', CharacterClass::HEAL, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30000.0);
 
-        $user9 = (new User())->setUsername('os_t9')->setEmail('t9@reunion.re')->setPassword('hash');
-        $this->em->persist($user9);
-        $lvl9Tank = (new Character($user9, 'TankLvl9', CharacterClass::TANK))
-            ->setLevel(9)->setZoneCode('fournaise')->setPosX($boss->getPosX() + 3)->setPosY($boss->getPosY())->setPosZ($boss->getPosZ());
-        $s9 = $this->stats->compute($lvl9Tank);
-        $lvl9Tank->setCurrentHp($s9['maxHp'])->setCurrentMp($s9['maxMp']);
-        $this->em->persist($lvl9Tank);
+        $user59 = (new User())->setUsername('os_t59')->setEmail('t59@reunion.re')->setPassword('hash');
+        $this->em->persist($user59);
+        $lvl59Tank = (new Character($user59, 'TankLvl59', CharacterClass::TANK))
+            ->setLevel(59)->setZoneCode('fournaise')->setPosX($boss->getPosX() + 3)->setPosY($boss->getPosY())->setPosZ($boss->getPosZ());
+        $g59 = CharacterClass::TANK->levelGrowth();
+        $lvl59Tank->setVitality($lvl59Tank->getVitality() + $g59['vitality'] * 58)
+            ->setDefense($lvl59Tank->getDefense() + $g59['defense'] * 58);
+        $s59 = $this->stats->compute($lvl59Tank);
+        $lvl59Tank->setCurrentHp($s59['maxHp'])->setCurrentMp($s59['maxMp']);
+        $this->em->persist($lvl59Tank);
         $this->em->flush();
 
-        foreach (['DPS Niv.10' => $lvl10Dps, 'Heal Niv.10' => $lvl10Heal, 'Tank Niv.9' => $lvl9Tank] as $lbl => $victim) {
+        foreach (['DPS Niv.60' => $lvl60Dps, 'Heal Niv.60' => $lvl60Heal, 'Tank Niv.59' => $lvl59Tank] as $lbl => $victim) {
             $simRef->invokeArgs($this->sim, [$boss, $victim, 30000.0, &$events]);
-            self::assertTrue($victim->isDead(), $lbl.' doit être one-shot par le World Boss.');
+            self::assertTrue($victim->isDead(), $lbl.' doit être one-shot par le World Boss Niv. 65.');
             self::assertSame(0, $victim->getCurrentHp());
         }
 
-        // 2. Unbuffed & unhealed Level 10 Tank survives 2 hits and MUST die on the 3rd hit (3 hits max)!
-        $tank10 = $this->createLevel10Hero('tk10', 'BasaltLvl10', CharacterClass::TANK, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30010.0);
+        // 2. Unbuffed & unhealed Level 60 Tank survives 2 hits and MUST die on the 3rd hit (3 hits max)!
+        $tank60 = $this->createLevel60Hero('tk60', 'BasaltLvl60', CharacterClass::TANK, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30010.0);
         $this->em->flush();
 
-        $simRef->invokeArgs($this->sim, [$boss, $tank10, 30010.0, &$events]);
-        self::assertFalse($tank10->isDead(), 'Le Tank Niv.10 doit survivre au 1er coup.');
-        $simRef->invokeArgs($this->sim, [$boss, $tank10, 30012.0, &$events]);
-        self::assertFalse($tank10->isDead(), 'Le Tank Niv.10 doit encore survivre au 2e coup sans buff/soin.');
-        $simRef->invokeArgs($this->sim, [$boss, $tank10, 30014.0, &$events]);
-        self::assertTrue($tank10->isDead(), 'Le Tank Niv.10 sans buff ni soin doit mourir au 3e coup (3 coups max).');
+        $simRef->invokeArgs($this->sim, [$boss, $tank60, 30010.0, &$events]);
+        self::assertFalse($tank60->isDead(), 'Le Tank Niv.60 doit survivre au 1er coup.');
+        $simRef->invokeArgs($this->sim, [$boss, $tank60, 30012.0, &$events]);
+        self::assertFalse($tank60->isDead(), 'Le Tank Niv.60 doit encore survivre au 2e coup sans buff/soin.');
+        $simRef->invokeArgs($this->sim, [$boss, $tank60, 30014.0, &$events]);
+        self::assertTrue($tank60->isDead(), 'Le Tank Niv.60 sans buff ni soin doit mourir au 3e coup (3 coups max).');
 
-        // 3. With Peau de Basalte (basalt_skin) buff active, Level 10 Tank survives 3 hits easily!
-        $buffedTank = $this->createLevel10Hero('tk10b', 'BasaltBuffed', CharacterClass::TANK, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30020.0);
+        // 3. With Peau de Basalte (basalt_skin) buff active, Level 60 Tank survives 3 hits easily!
+        $buffedTank = $this->createLevel60Hero('tk60b', 'BasaltBuffed', CharacterClass::TANK, $boss->getPosX() + 3, $boss->getPosY(), $boss->getPosZ(), 30020.0);
         $this->em->flush();
         $buffRes = $this->combat->castSkill($buffedTank, 'basalt_skin', null, null, 30020.0);
         self::assertTrue($buffRes['ok']);
@@ -261,10 +265,10 @@ final class WorldBossRaidTest extends KernelTestCase
         for ($i = 0; $i < 3; ++$i) {
             $simRef->invokeArgs($this->sim, [$boss, $buffedTank, 30021.0 + $i * 2.0, &$events]);
         }
-        self::assertFalse($buffedTank->isDead(), 'Sous Peau de Basalte (-40%), un Tank Niv.10 survit au 3e coup pour laisser le temps au Heal.');
+        self::assertFalse($buffedTank->isDead(), 'Sous Peau de Basalte (-40%), un Tank Niv.60 survit au 3e coup pour laisser le temps au Heal.');
     }
 
-    private function createLevel10Hero(
+    private function createLevel60Hero(
         string $username,
         string $name,
         CharacterClass $cls,
@@ -277,20 +281,20 @@ final class WorldBossRaidTest extends KernelTestCase
         $this->em->persist($user);
 
         $c = (new Character($user, $name, $cls))
-            ->setLevel(10)
+            ->setLevel(60)
             ->setZoneCode('fournaise')
             ->setPosX($x)
             ->setPosY($y)
             ->setPosZ($z)
             ->setLastSeenAt($now);
 
-        // Apply realistic level 10 growth stats + allocated points
+        // Apply realistic Level 60 growth (59 level-ups) + allocated free stat points & Rank 5 core skill
         $growth = $cls->levelGrowth();
-        $c->setVitality($c->getVitality() + $growth['vitality'] * 9 + 8)
-            ->setStrength($c->getStrength() + $growth['strength'] * 9 + ($cls === CharacterClass::DPS ? 16 : 6))
-            ->setIntelligence($c->getIntelligence() + $growth['intelligence'] * 9 + ($cls === CharacterClass::HEAL ? 16 : 4))
-            ->setDefense($c->getDefense() + $growth['defense'] * 9 + ($cls === CharacterClass::TANK ? 14 : 4))
-            ->setSpirit($c->getSpirit() + $growth['spirit'] * 9 + 6);
+        $c->setVitality($c->getVitality() + $growth['vitality'] * 59 + 45)
+            ->setStrength($c->getStrength() + $growth['strength'] * 59 + ($cls === CharacterClass::DPS ? 110 : 25))
+            ->setIntelligence($c->getIntelligence() + $growth['intelligence'] * 59 + ($cls === CharacterClass::HEAL ? 110 : 20))
+            ->setDefense($c->getDefense() + $growth['defense'] * 59 + ($cls === CharacterClass::TANK ? 95 : 22))
+            ->setSpirit($c->getSpirit() + $growth['spirit'] * 59 + 30);
 
         $computed = $this->stats->compute($c, $now);
         $c->setCurrentHp($computed['maxHp'])->setCurrentMp($computed['maxMp']);

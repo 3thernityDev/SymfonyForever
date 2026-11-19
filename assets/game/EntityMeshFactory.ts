@@ -414,14 +414,168 @@ export function createMonsterMesh(meshKey: string, primaryColor: string, scale: 
     const cR = cL.clone();
     cR.position.x = 0.95;
     body.add(cL, cR);
-  } else if (meshKey === 'wasp' || meshKey === 'bird') {
-    const core = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.6, 6), mainMat);
-    core.rotation.x = Math.PI / 2;
-    core.position.y = 2.0;
-    const wingGeo = new THREE.BoxGeometry(2.4, 0.08, 0.75);
-    const wings = new THREE.Mesh(wingGeo, mat(meshKey === 'wasp' ? 0xfef08a : 0x52525b, 0.4, 0.1));
-    wings.position.y = 2.2;
-    body.add(core, wings);
+  } else if (meshKey === 'wasp' || meshKey === 'bird' || meshKey === 'tropicbird' || meshKey === 'songbird' || meshKey === 'bat' || meshKey === 'butterfly') {
+    const hoverY = meshKey === 'butterfly' ? 2.15 : 2.0;
+    const isTinyBird = meshKey === 'songbird';
+    const core = meshKey === 'butterfly'
+      ? new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.16, 1.35, 6), mat(0x1e293b, 0.6, 0.2))
+      : new THREE.Mesh(
+          meshKey === 'bat'
+            ? new THREE.DodecahedronGeometry(0.52, 0)
+            : isTinyBird
+              ? new THREE.SphereGeometry(0.54, 7, 6)
+              : new THREE.ConeGeometry(0.55, 1.6, 6),
+          mainMat,
+        );
+    if (!isTinyBird) {
+      core.rotation.x = Math.PI / 2;
+    } else {
+      core.scale.set(0.95, 0.88, 1.25);
+    }
+    core.position.y = hoverY;
+    body.add(core);
+
+    if (meshKey === 'butterfly') {
+      const upperGeo = new THREE.BoxGeometry(1.45, 0.06, 1.05);
+      const lowerGeo = new THREE.BoxGeometry(1.05, 0.06, 0.85);
+      const wingMat = mat(primaryColor, 0.35, 0.15, primaryColor);
+      const trimMat = mat(0xfacc15, 0.3, 0.2, 0xf59e0b);
+      for (const side of [-1, 1]) {
+        const uw = new THREE.Mesh(upperGeo, wingMat);
+        uw.position.set(side * 0.86, hoverY + 0.15, 0.22);
+        uw.rotation.z = side * 0.22;
+        const lw = new THREE.Mesh(lowerGeo, trimMat);
+        lw.position.set(side * 0.65, hoverY + 0.08, -0.52);
+        lw.rotation.z = side * 0.18;
+        body.add(uw, lw);
+      }
+    } else {
+      const span = meshKey === 'tropicbird' ? 3.2 : meshKey === 'bat' ? 2.85 : isTinyBird ? 1.85 : 2.4;
+      const wingColor = meshKey === 'wasp' ? 0xfef08a : meshKey === 'tropicbird' ? 0xf8fafc : meshKey === 'bat' ? 0x18181b : isTinyBird ? primaryColor : 0x52525b;
+      const wingGeo = new THREE.BoxGeometry(span, 0.08, meshKey === 'bat' ? 0.95 : 0.72);
+      const wings = new THREE.Mesh(wingGeo, mat(wingColor, 0.4, 0.1));
+      wings.position.y = hoverY + 0.16;
+      body.add(wings);
+
+      if (meshKey === 'tropicbird') {
+        // Iconic Paille-en-Queue / Petrel long twin tail streamers
+        const streamerGeo = new THREE.CylinderGeometry(0.03, 0.015, 1.85, 5);
+        const s1 = new THREE.Mesh(streamerGeo, mat(0xffffff, 0.3, 0.1, 0xe2e8f0));
+        s1.rotation.x = Math.PI / 2;
+        s1.position.set(-0.1, hoverY + 0.05, -1.55);
+        const s2 = s1.clone();
+        s2.position.x = 0.1;
+        body.add(s1, s2);
+      }
+      if (isTinyBird) {
+        const beak = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.45, 5), mat(0xfacc15, 0.4, 0.1));
+        beak.rotation.x = Math.PI / 2;
+        beak.position.set(0, hoverY + 0.04, 0.85);
+        body.add(beak);
+      }
+      if (meshKey === 'bat') {
+        const earGeo = new THREE.ConeGeometry(0.14, 0.38, 4);
+        const earL = new THREE.Mesh(earGeo, mainMat);
+        earL.position.set(-0.22, hoverY + 0.5, 0.35);
+        const earR = earL.clone();
+        earR.position.x = 0.22;
+        body.add(earL, earR);
+      }
+    }
+  } else if (meshKey === 'ibis') {
+    // Solitaire de La Réunion (plump white flightless ibis with curved dark beak & dark wingtips)
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.76, 8, 7), mainMat);
+    torso.scale.set(0.95, 0.95, 1.25);
+    torso.position.y = 1.15;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 7, 6), mainMat);
+    head.position.set(0, 1.95, 0.72);
+    const beak = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 0.78, 5), mat(0x1f2937, 0.5, 0.2));
+    beak.rotation.x = Math.PI / 1.75;
+    beak.position.set(0, 1.78, 1.18);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.38, 0.75, 5), mat(0x334155, 0.6, 0.1));
+    tail.rotation.x = -Math.PI / 2.6;
+    tail.position.set(0, 1.25, -0.95);
+    body.add(torso, head, beak, tail);
+  } else if (meshKey === 'spider') {
+    // Bibe Géante de Mafate (Nephila orb-weaver with golden striped abdomen + 8 long legs)
+    const abdomen = new THREE.Mesh(new THREE.SphereGeometry(0.78, 8, 6), mainMat);
+    abdomen.scale.set(0.82, 0.78, 1.3);
+    abdomen.position.set(0, 1.05, -0.45);
+    const cephalo = new THREE.Mesh(new THREE.SphereGeometry(0.45, 7, 6), mat(0x18181b, 0.5, 0.2));
+    cephalo.position.set(0, 1.0, 0.65);
+    const legGeo = new THREE.CylinderGeometry(0.045, 0.045, 1.65, 5);
+    const legMat = mat(0x1f2937, 0.6, 0.2);
+    for (let i = 0; i < 4; i++) {
+      for (const side of [-1, 1]) {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(side * (0.75 + (i % 2) * 0.18), 0.78, -0.35 + i * 0.42);
+        leg.rotation.z = side * 0.82;
+        leg.rotation.y = (i - 1.5) * 0.28 * side;
+        body.add(leg);
+      }
+    }
+    body.add(abdomen, cephalo);
+  } else if (meshKey === 'tortoise') {
+    // Tortue Géante de Bourbon (high domed carapace + head + sturdy pillar legs)
+    const shell = new THREE.Mesh(new THREE.DodecahedronGeometry(1.05, 0), mainMat);
+    shell.scale.set(1.05, 0.78, 1.28);
+    shell.position.y = 1.02;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.4, 0.65), mat(0x78716c, 0.75, 0.1));
+    head.position.set(0, 0.96, 1.28);
+    const legGeo = new THREE.CylinderGeometry(0.2, 0.22, 0.65, 6);
+    const legMat = mat(0x44403c, 0.8, 0.1);
+    for (const lx of [-0.68, 0.68]) {
+      for (const lz of [-0.65, 0.65]) {
+        const leg = new THREE.Mesh(legGeo, legMat);
+        leg.position.set(lx, 0.34, lz);
+        body.add(leg);
+      }
+    }
+    body.add(shell, head);
+  } else if (meshKey === 'centipede') {
+    // Scolopendre du Grand Brûlé (multi-segmented volcanic armor + twin pincers)
+    const segGeo = new THREE.SphereGeometry(0.46, 7, 6);
+    const darkMat = mat(0x18181b, 0.5, 0.25);
+    for (let i = 0; i < 5; i++) {
+      const seg = new THREE.Mesh(segGeo, i % 2 === 0 ? mainMat : darkMat);
+      seg.scale.set(1.05, 0.72, 1.0);
+      seg.position.set(Math.sin(i * 0.7) * 0.14, 0.56, 1.0 - i * 0.65);
+      body.add(seg);
+    }
+    const pincerGeo = new THREE.ConeGeometry(0.1, 0.52, 4);
+    for (const side of [-1, 1]) {
+      const p = new THREE.Mesh(pincerGeo, mat(0xfacc15, 0.3, 0.2));
+      p.rotation.x = Math.PI / 2;
+      p.rotation.z = side * 0.3;
+      p.position.set(side * 0.25, 0.58, 1.48);
+      body.add(p);
+    }
+  } else if (meshKey === 'chameleon' || meshKey === 'gecko') {
+    // Endormi / Gecko Vert de Bourbon (emerald reptile + tail; crest for chameleon, scarlet spots for gecko)
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.76, 0.65, 1.55), mainMat);
+    torso.position.y = 0.78;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.56, 0.64), mainMat);
+    head.position.set(0, 0.96, 0.96);
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.3, 5), mainMat);
+    tail.rotation.x = -Math.PI / 2;
+    tail.position.set(0, 0.72, -1.25);
+    body.add(torso, head, tail);
+    if (meshKey === 'chameleon') {
+      const casque = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.55, 4), mat(0x34d399, 0.5, 0.15));
+      casque.position.set(0, 1.38, 0.85);
+      casque.rotation.x = -0.35;
+      const tailCoil = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.08, 5, 10), mainMat);
+      tailCoil.rotation.y = Math.PI / 2;
+      tailCoil.position.set(0, 0.86, -1.65);
+      body.add(casque, tailCoil);
+    } else {
+      const spotMat = mat(0xef4444, 0.35, 0.2, 0xdc2626);
+      for (let i = 0; i < 3; i++) {
+        const spot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), spotMat);
+        spot.position.set(0, 1.12, -0.35 + i * 0.42);
+        body.add(spot);
+      }
+    }
   } else if (meshKey === 'golem' || meshKey === 'boss_volcano') {
     const isVolcanoBoss = meshKey === 'boss_volcano';
     const glow = isVolcanoBoss ? 0xff4500 : undefined;
@@ -528,8 +682,26 @@ export function createMonsterMesh(meshKey: string, primaryColor: string, scale: 
 
   // Glowing eyes facing +Z
   const eyeGeo = new THREE.BoxGeometry(0.14, 0.12, 0.14);
-  const eyeY = meshKey === 'golem' || meshKey === 'boss_volcano' ? 3.05 : meshKey === 'wasp' || meshKey === 'bird' ? 2.05 : 1.15;
-  const eyeZ = meshKey === 'golem' || meshKey === 'boss_volcano' ? 0.52 : 1.15;
+  const eyeY =
+    meshKey === 'golem' || meshKey === 'boss_volcano'
+      ? 3.05
+      : meshKey === 'butterfly'
+        ? 2.2
+        : meshKey === 'wasp' || meshKey === 'bird' || meshKey === 'tropicbird' || meshKey === 'songbird' || meshKey === 'bat'
+          ? 2.05
+          : meshKey === 'ibis'
+            ? 2.02
+            : meshKey === 'centipede'
+              ? 0.72
+              : 1.05;
+  const eyeZ =
+    meshKey === 'golem' || meshKey === 'boss_volcano'
+      ? 0.52
+      : meshKey === 'tortoise'
+        ? 1.56
+        : meshKey === 'centipede'
+          ? 1.36
+          : 1.15;
   const eL = new THREE.Mesh(eyeGeo, eyeMat);
   eL.position.set(-0.2, eyeY, eyeZ);
   const eR = eL.clone();
