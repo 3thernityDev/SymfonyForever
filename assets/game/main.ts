@@ -662,15 +662,12 @@ class SymfonyForeverGame {
         return;
       }
 
-      if (e.code === 'KeyF' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen) {
+      if (e.code === 'KeyF' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen && !(this.selfState?.isDead ?? false)) {
         if (this.nearestLootId !== null) {
           e.preventDefault();
           void this.pickupLootById(this.nearestLootId);
           return;
         }
-      }
-
-      if (e.code === 'KeyE' && !e.repeat && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen) {
         if (this.nearestNpcCode) {
           e.preventDefault();
           this.openNpcModal(this.nearestNpcCode);
@@ -1671,9 +1668,11 @@ class SymfonyForeverGame {
     this.nearestNpcCode = closestCode;
     const promptEl = document.getElementById('npc-interact-prompt');
     if (promptEl) {
-      if (closestCode && this.activeNpcModalCode === null && !this.charModalOpen && !(this.selfState?.isDead ?? false)) {
+      if (closestCode && this.activeNpcModalCode === null && !this.charModalOpen && !this.bagModalOpen && !(this.selfState?.isDead ?? false)) {
         const npc = this.npcs.get(closestCode)?.data;
-        promptEl.textContent = `💬 Appuyez sur [E] ou cliquez pour parler à ${npc?.name ?? 'PNJ'}`;
+        promptEl.textContent = this.nearestLootId !== null
+          ? `💬 Cliquez pour parler à ${npc?.name ?? 'PNJ'}`
+          : `💬 Appuyez sur [F] ou cliquez pour parler à ${npc?.name ?? 'PNJ'}`;
         promptEl.classList.add('visible');
       } else {
         promptEl.classList.remove('visible');
