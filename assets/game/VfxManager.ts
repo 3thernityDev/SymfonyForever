@@ -110,6 +110,20 @@ export class VfxManager {
     }
   }
 
+  public spawnAutoAttackSwing(origin: THREE.Vector3, rotY: number, classCode: ClassCode): void {
+    const fx = Math.sin(rotY);
+    const fz = Math.cos(rotY);
+    if (classCode === 'HEAL') {
+      const from = new THREE.Vector3(origin.x + fx * 0.8, origin.y + 1.8, origin.z + fz * 0.8);
+      const to = new THREE.Vector3(origin.x + fx * 14.0, origin.y + 1.5, origin.z + fz * 14.0);
+      this.spawnProjectile(from, to, '#34d399');
+      return;
+    }
+
+    const pos = new THREE.Vector3(origin.x + fx * 2.1, origin.y + 1.5, origin.z + fz * 2.1);
+    this.spawnBurst(pos, classCode === 'TANK' ? '#fbbf24' : '#f97316', 0.22);
+  }
+
   public update(dt: number): void {
     for (let i = this.effects.length - 1; i >= 0; i--) {
       const fx = this.effects[i];

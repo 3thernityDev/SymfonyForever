@@ -116,6 +116,7 @@ class SymfonyForeverGame {
   private readonly skillPressTimers = new Map<string | number, number>();
   private readonly skillFlashTimers = new Map<string | number, number>();
   private autoAttackInFlight = false;
+  private localAaCooldownUntil = 0;
   private lastQuestSignature = '';
   private lastInventorySignature = '';
 
@@ -586,6 +587,7 @@ class SymfonyForeverGame {
     });
     this.canvas.addEventListener('pointerup', (e) => {
       if (e.button !== 0) return;
+      if (this.charModalOpen || this.bagModalOpen || this.activeNpcModalCode !== null) return;
       if (Math.hypot(e.clientX - downX, e.clientY - downY) > 6) return;
       this.pickEntityAt(e.clientX, e.clientY);
     });
@@ -878,29 +880,8 @@ class SymfonyForeverGame {
       }
     }
 
-    // Left-click on open ground: auto-attack current living enemy target (or nearest enemy within swing range)
-    const targetedMonster =
-      this.targetType === 'MONSTER' && this.targetId !== null ? this.monsters.get(this.targetId) : undefined;
-    if (targetedMonster && targetedMonster.state.state !== 'DEAD') {
-      void this.performAutoAttack();
-      return;
-    }
-
-    const aaRange = this.classCode === 'HEAL' ? 18.0 : 8.5;
-    let nearestId: number | null = null;
-    let nearestDist = aaRange;
-    for (const m of this.monsters.values()) {
-      if (m.state.state === 'DEAD') continue;
-      const d = Math.hypot(m.state.x - this.controller.x, m.state.z - this.controller.z);
-      if (d <= nearestDist) {
-        nearestDist = d;
-        nearestId = m.state.id;
-      }
-    }
-    if (nearestId !== null) {
-      this.setTarget('MONSTER', nearestId);
-      void this.performAutoAttack();
-    }
+    // Left-click on open ground / empty space: always trigger auto-attack swing (even with no mob in range)
+    void this.performAutoAttack();
   }
 
   private cycleNearestMonster(): void {
@@ -981,27 +962,62 @@ class SymfonyForeverGame {
 
   private async performAutoAttack(): Promise<void> {
     if (!this.selfState || this.selfState.isDead || this.autoAttackInFlight) return;
-    if ((this.selfState.autoAttackCooldown ?? 0) > 0.08) return;
+    const nowSec = performance.now() / 1000;
+    const aaRem = Math.max(this.selfState.autoAttackCooldown ?? 0, this.localAaCooldownUntil - nowSec);
+    if (aaRem > 0.08) return;
 
     this.flashSkillButton('aa', 'press');
 
-    if (this.targetType !== 'MONSTER' || this.targetId === null) {
-      this.cycleNearestMonster();
+    const aaRange = this.classCode === 'HEAL' ? 18.0 : 8.5;
+    let inRangeTargetId: number | null = null;
+
+    if (this.targetType === 'MONSTER' && this.targetId !== null) {
+      const targeted = this.monsters.get(this.targetId);
+      if (targeted && targeted.state.state !== 'DEAD') {
+        const dist = Math.hypot(targeted.state.x - this.controller.x, targeted.state.z - this.controller.z);
+        if (dist <= aaRange) {
+          inRangeTargetId = targeted.state.id;
+        }
+      }
     }
-    if (this.targetType !== 'MONSTER' || this.targetId === null) {
-      this.flashSkillButton('aa', 'reject');
+
+    if (inRangeTargetId === null) {
+      let nearestId: number | null = null;
+      let nearestDist = aaRange;
+      for (const m of this.monsters.values()) {
+        if (m.state.state === 'DEAD') continue;
+        const dist = Math.hypot(m.state.x - this.controller.x, m.state.z - this.controller.z);
+        if (dist <= nearestDist) {
+          nearestDist = dist;
+          nearestId = m.state.id;
+        }
+      }
+      if (nearestId !== null) {
+        this.setTarget('MONSTER', nearestId);
+        inRangeTargetId = nearestId;
+      }
+    }
+
+    // Empty-air swing when no monster is within auto-attack range (client-side animation + VFX + 1.2s timer)
+    if (inRangeTargetId === null) {
+      this.localAaCooldownUntil = nowSec + 1.2;
+      this.selfState.autoAttackCooldown = 1.2;
+      this.flashSkillButton('aa', 'cast');
+      triggerAvatarSkill(this.selfAvatar, 'auto_attack');
+      this.vfx.spawnAutoAttackSwing(this.selfAvatar.group.position, this.controller.rotY, this.classCode);
       return;
     }
 
     this.autoAttackInFlight = true;
     try {
-      const res = await this.net.autoAttack(this.characterId, this.targetType, this.targetId);
+      const res = await this.net.autoAttack(this.characterId, 'MONSTER', inRangeTargetId);
       if (!res.ok) {
         this.flashSkillButton('aa', 'reject');
         if (res.error && res.error !== 'Auto-attaque en recharge.') this.showToast(res.error);
         return;
       }
 
+      this.localAaCooldownUntil = performance.now() / 1000 + 1.2;
       this.flashSkillButton('aa', 'cast');
       this.faceCurrentTarget();
       triggerAvatarSkill(this.selfAvatar, 'auto_attack');
@@ -1203,7 +1219,7 @@ class SymfonyForeverGame {
     // Auto-Attack 1.2s swing timer indicator
     const aaBtn = document.getElementById('skill-slot-aa');
     if (aaBtn) {
-      const aaRem = this.selfState.autoAttackCooldown ?? 0;
+      const aaRem = Math.max(this.selfState.autoAttackCooldown ?? 0, Math.max(0, this.localAaCooldownUntil - performance.now() / 1000));
       const aaOverlay = aaBtn.querySelector('.skill-cd-overlay') as HTMLElement | null;
       const aaSweep = aaBtn.querySelector('.skill-cd-sweep') as HTMLElement | null;
       if (aaRem > 0.05) {
