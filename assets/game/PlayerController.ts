@@ -31,9 +31,12 @@ export class PlayerController {
     window.addEventListener('keydown', (e) => {
       if (this.inputBlocked) return;
       this.keys.add(e.code);
-      if (e.code === 'Space' && this.isGrounded) {
-        this.vy = 13.5;
-        this.isGrounded = false;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (this.isGrounded) {
+          this.vy = 13.5;
+          this.isGrounded = false;
+        }
       }
     });
 

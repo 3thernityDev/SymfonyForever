@@ -522,10 +522,13 @@ class SymfonyForeverGame {
       if (e.key === 'Tab') {
         e.preventDefault();
         this.cycleNearestMonster();
-      } else if (e.key === 'c' || e.key === 'C') {
+      } else if (e.code === 'KeyC' || e.key === 'c' || e.key === 'C') {
         this.toggleCharModal(!this.charModalOpen);
-      } else if (e.key === '1' || e.key === '2' || e.key === '3' || e.key === '4') {
-        void this.castSlot(Number(e.key));
+      } else if (this.resolveSkillSlotFromKey(e) !== null) {
+        e.preventDefault();
+        if (!e.repeat) {
+          void this.castSlot(this.resolveSkillSlotFromKey(e)!);
+        }
       } else if (e.key === 'F1') {
         e.preventDefault();
         this.setTarget('PLAYER', this.characterId);
@@ -601,6 +604,34 @@ class SymfonyForeverGame {
       await this.net.partyAction('leave', { characterId: this.characterId });
       this.showToast('Vous avez quitté le groupe.');
     });
+  }
+
+  private resolveSkillSlotFromKey(e: KeyboardEvent): number | null {
+    const codeMap: Record<string, number> = {
+      Digit1: 1,
+      Digit2: 2,
+      Digit3: 3,
+      Digit4: 4,
+      Numpad1: 1,
+      Numpad2: 2,
+      Numpad3: 3,
+      Numpad4: 4,
+    };
+    if (e.code in codeMap) {
+      return codeMap[e.code];
+    }
+
+    const keyMap: Record<string, number> = {
+      '1': 1,
+      '2': 2,
+      '3': 3,
+      '4': 4,
+      '&': 1,
+      'é': 2,
+      '"': 3,
+      "'": 4,
+    };
+    return keyMap[e.key] ?? null;
   }
 
   private pickEntityAt(clientX: number, clientY: number): void {
