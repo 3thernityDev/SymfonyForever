@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   animateAvatar,
+  applyAvatarEquipment,
   createLootDropMesh,
   createMonsterMesh,
   createNpcMesh,
@@ -11,6 +12,7 @@ import {
   type MonsterVisual,
   type NpcVisual,
 } from './EntityMeshFactory';
+import type { EquippedSlotVisual } from './ClassEquipmentBuilder';
 import { Minimap } from './Minimap';
 import { NetworkClient } from './NetworkClient';
 import { PlayerController } from './PlayerController';
@@ -1786,6 +1788,14 @@ class SymfonyForeverGame {
     if (badge) badge.textContent = `${inv.bagSlotsUsed}/${inv.maxBagSlots}`;
 
     if (changed) {
+      const equipVisuals: Partial<Record<EquipmentSlot, EquippedSlotVisual | null>> = {};
+      for (const slot of ['WEAPON', 'ARMOR', 'HELM', 'ACCESSORY'] as EquipmentSlot[]) {
+        const entry = inv.equipped[slot];
+        const def = entry ? this.manifest.items[entry.itemCode] : undefined;
+        equipVisuals[slot] = entry && def ? { itemCode: entry.itemCode, rarity: def.rarity } : null;
+      }
+      applyAvatarEquipment(this.selfAvatar, equipVisuals);
+
       if (this.bagModalOpen) this.renderBagModalContent();
       if (this.activeNpcModalCode !== null && this.activeNpcModalTab === 'VENDOR') {
         this.renderNpcVendorContent(this.activeNpcModalCode);

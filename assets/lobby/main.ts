@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import { animateAvatar, createPlayerAvatar, type AnimatedAvatar } from '../game/EntityMeshFactory';
+import {
+  animateAvatar,
+  createPlayerAvatar,
+  triggerAvatarSkill,
+  type AnimatedAvatar,
+} from '../game/EntityMeshFactory';
 import type { ClassCode, ClassMeta, SkillData } from '../game/types';
 
 interface LobbyClassEntry {
@@ -16,11 +21,11 @@ if (panel && canvas && hiddenInput) {
   const byCode = new Map<ClassCode, LobbyClassEntry>();
   classes.forEach((c) => byCode.set(c.meta.code, c));
 
-  // Lightweight 3D turntable preview of Tank / DPS / Heal
+  // Lightweight 3D turntable preview of Tank / DPS / Heal (all using Tikaf base rig + class gear!)
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, canvas.clientWidth / Math.max(1, canvas.clientHeight), 0.1, 50);
-  camera.position.set(0, 2.2, 5.4);
-  camera.lookAt(0, 1.45, 0);
+  camera.position.set(0, 2.3, 6.25);
+  camera.lookAt(0, 1.65, 0);
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -94,13 +99,21 @@ if (panel && canvas && hiddenInput) {
       skillsEl.innerHTML = entry.skills
         .map(
           (s) => `
-        <div class="skill-chip">
+        <div class="skill-chip" data-preview-skill="${s.code}" style="cursor:pointer;" title="Cliquer pour prévisualiser l'animation de cette compétence">
           <strong>${s.icon} ${s.name} <small>(Niv. ${s.unlockLevel})</small></strong>
           <small>${s.description}</small>
         </div>
       `,
         )
         .join('');
+      skillsEl.querySelectorAll<HTMLElement>('[data-preview-skill]').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          const skillCode = chip.dataset.previewSkill;
+          if (skillCode && currentAvatar) {
+            triggerAvatarSkill(currentAvatar, skillCode);
+          }
+        });
+      });
     }
 
     if (currentAvatar) scene.remove(currentAvatar.group);

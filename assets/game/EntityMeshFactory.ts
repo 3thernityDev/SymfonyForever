@@ -1,7 +1,12 @@
 import * as THREE from 'three';
+import {
+  attachClassEquipment,
+  type EquipmentVisualRig,
+  type EquippedSlotVisual,
+} from './ClassEquipmentBuilder';
 import { instantiateTikafRig, TIKAF_FOOT_SPEED_AT_1X } from './ModelAssetCache';
 import { ProceduralBoneAnimator } from './ProceduralBoneAnimator';
-import type { ClassCode } from './types';
+import type { ClassCode, EquipmentSlot } from './types';
 
 export interface AnimatedAvatar {
   group: THREE.Group;
@@ -19,6 +24,16 @@ export interface AnimatedAvatar {
   fbxMixer: THREE.AnimationMixer | null;
   fbxWalkAction: THREE.AnimationAction | null;
   boneAnimator: ProceduralBoneAnimator | null;
+  equipmentRig: EquipmentVisualRig | null;
+  pendingEquipped: Partial<Record<EquipmentSlot, EquippedSlotVisual | null>> | null;
+}
+
+export function applyAvatarEquipment(
+  avatar: AnimatedAvatar,
+  equipped: Partial<Record<EquipmentSlot, EquippedSlotVisual | null>>,
+): void {
+  avatar.pendingEquipped = equipped;
+  avatar.equipmentRig?.applyEquippedVisuals(equipped);
 }
 
 export function triggerAvatarSkill(avatar: AnimatedAvatar, skillCode: string): void {
@@ -196,26 +211,32 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     fbxMixer: null,
     fbxWalkAction: null,
     boneAnimator: null,
+    equipmentRig: null,
+    pendingEquipped: null,
   };
 
-  // Attach custom animated 3D Tikaf.fbx model to the DPS class!
-  if (classCode === 'DPS') {
-    void instantiateTikafRig()
-      .then((rig) => {
-        rig.root.traverse((obj) => {
-          obj.userData = group.userData;
-        });
-        body.add(rig.root);
-        proceduralRoot.visible = false;
-        avatar.fbxRoot = rig.root;
-        avatar.fbxMixer = rig.mixer;
-        avatar.fbxWalkAction = rig.walkAction;
-        avatar.boneAnimator = new ProceduralBoneAnimator(rig.root);
-      })
-      .catch((err) => {
-        console.warn('Impossible de charger Tikaf.fbx, fallback procédural actif :', err);
+  // Universal Tikaf.fbx base rig for ALL classes (TANK, DPS, HEAL):
+  // class identity comes from bone-parented heavy armor, flowing healer robe, or volcanic blades!
+  void instantiateTikafRig()
+    .then((rig) => {
+      const equipRig = attachClassEquipment(rig.root, classCode);
+      rig.root.traverse((obj) => {
+        obj.userData = group.userData;
       });
-  }
+      body.add(rig.root);
+      proceduralRoot.visible = false;
+      avatar.fbxRoot = rig.root;
+      avatar.fbxMixer = rig.mixer;
+      avatar.fbxWalkAction = rig.walkAction;
+      avatar.boneAnimator = new ProceduralBoneAnimator(rig.root);
+      avatar.equipmentRig = equipRig;
+      if (avatar.pendingEquipped) {
+        equipRig.applyEquippedVisuals(avatar.pendingEquipped);
+      }
+    })
+    .catch((err) => {
+      console.warn('Impossible de charger Tikaf.fbx, fallback procédural actif :', err);
+    });
 
   return avatar;
 }
@@ -275,6 +296,7 @@ export function animateAvatar(
     const skillPose = avatar.boneAnimator
       ? avatar.boneAnimator.apply(dt)
       : { bodyOffsetY: 0, bodyOffsetZ: 0, bodyYawOffset: 0, active: false };
+    avatar.equipmentRig?.update(dt, time);
 
     if (avatar.attackTimer > 0) {
       avatar.attackTimer = Math.max(0, avatar.attackTimer - dt);
