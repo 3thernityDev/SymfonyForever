@@ -21,7 +21,7 @@ class CharacterRepository extends ServiceEntityRepository
     }
 
     /**
-     * Online characters within spatial interest radius (or same zone).
+     * Online characters within strict circular spatial interest radius (sorted closest-first).
      *
      * @return list<Character>
      */
@@ -41,10 +41,23 @@ class CharacterRepository extends ServiceEntityRepository
             $qb->andWhere('c.id != :excludeId')->setParameter('excludeId', $excludeId);
         }
 
-        /** @var list<Character> $result */
-        $result = $qb->getQuery()->getResult();
+        /** @var list<Character> $candidates */
+        $candidates = $qb->getQuery()->getResult();
 
-        return $result;
+        $r2 = $radius * $radius;
+        $within = [];
+        foreach ($candidates as $c) {
+            $dx = $c->getPosX() - $x;
+            $dz = $c->getPosZ() - $z;
+            $d2 = $dx * $dx + $dz * $dz;
+            if ($d2 <= $r2) {
+                $within[] = ['d2' => $d2, 'c' => $c];
+            }
+        }
+
+        usort($within, static fn (array $a, array $b): int => $a['d2'] <=> $b['d2']);
+
+        return array_map(static fn (array $row): Character => $row['c'], $within);
     }
 
     /**

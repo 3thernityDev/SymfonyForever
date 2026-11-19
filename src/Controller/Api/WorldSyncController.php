@@ -27,7 +27,7 @@ use Symfony\Component\Routing\Attribute\Route;
 final class WorldSyncController extends AbstractController
 {
     public const float MAX_PLAYER_SPEED = 24.0; // world units/sec (+ tolerance for HTTP jitter)
-    public const float INTEREST_RADIUS = 340.0;
+    public const float INTEREST_RADIUS = 200.0;
 
     #[Route('/api/world/sync', name: 'api_world_sync', methods: ['POST'])]
     public function sync(

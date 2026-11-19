@@ -25,6 +25,7 @@ use Symfony\Component\Lock\LockFactory;
 final class WorldSimulationService
 {
     public const float TICK_INTERVAL = 1.0;
+    public const float ACTIVE_MONSTER_SIM_RADIUS = 220.0;
     public const float LEASH_DISTANCE = 52.0;
     public const float WORLD_BOSS_LEASH_DISTANCE = 78.0;
     public const int WORLD_BOSS_MIN_PLAYERS_NO_REGEN = 3;
@@ -80,11 +81,33 @@ final class WorldSimulationService
                 $this->tickPlayer($player, $step, $now);
             }
 
-            // 2. Tick monsters (respawn, DoTs, aggro, movement, melee attack, leash)
+            // 2. Tick active monsters (respawn, DoTs, combat, returning, and IDLE mobs near alive online players)
             $monsters = $this->monsterRepository->findByZone($zoneCode);
             $createdEvents = [];
+            $alivePlayers = array_values(array_filter(
+                $players,
+                static fn (Character $p): bool => !$p->isDead(),
+            ));
+            $activeRadiusSq = self::ACTIVE_MONSTER_SIM_RADIUS * self::ACTIVE_MONSTER_SIM_RADIUS;
 
             foreach ($monsters as $monster) {
+                if ($monster->getState() === MonsterInstance::STATE_IDLE && $monster->getActiveEffects() === []) {
+                    $hasNearbyPlayer = false;
+                    $mx = $monster->getPosX();
+                    $mz = $monster->getPosZ();
+                    foreach ($alivePlayers as $ap) {
+                        $dx = $ap->getPosX() - $mx;
+                        $dz = $ap->getPosZ() - $mz;
+                        if (($dx * $dx + $dz * $dz) <= $activeRadiusSq) {
+                            $hasNearbyPlayer = true;
+                            break;
+                        }
+                    }
+                    if (!$hasNearbyPlayer) {
+                        continue;
+                    }
+                }
+
                 $this->tickMonster($monster, $playersById, $step, $now, $createdEvents);
             }
 

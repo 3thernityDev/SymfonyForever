@@ -13,6 +13,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Entity(repositoryClass: CharacterRepository::class)]
 #[ORM\Table(name: 'game_character')]
 #[ORM\Index(name: 'idx_char_zone_seen', columns: ['zone_code', 'last_seen_at'])]
+#[ORM\Index(name: 'idx_char_seen_pos', columns: ['last_seen_at', 'pos_x', 'pos_z'])]
 class Character
 {
     #[ORM\Id]

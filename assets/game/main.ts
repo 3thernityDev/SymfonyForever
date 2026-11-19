@@ -439,6 +439,7 @@ class SymfonyForeverGame {
     for (const [id, entry] of this.remotePlayers) {
       if (!seenPlayers.has(id)) {
         this.scene.remove(entry.avatar.group);
+        this.disposeRemotePlayerAvatar(entry.avatar);
         entry.nameplate.remove();
         this.remotePlayers.delete(id);
         if (this.targetType === 'PLAYER' && this.targetId === id) this.clearTarget();
@@ -473,6 +474,7 @@ class SymfonyForeverGame {
     for (const [id, entry] of this.monsters) {
       if (!seenMonsters.has(id)) {
         this.scene.remove(entry.visual.group);
+        this.disposeProceduralObject(entry.visual.group);
         entry.nameplate.remove();
         this.monsters.delete(id);
         if (this.targetType === 'MONSTER' && this.targetId === id) this.clearTarget();
@@ -1603,6 +1605,38 @@ class SymfonyForeverGame {
     log.scrollTop = log.scrollHeight;
   }
 
+  private disposeProceduralObject(root: THREE.Object3D): void {
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry?.dispose();
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats) {
+        if (m) m.dispose();
+      }
+    });
+  }
+
+  private disposeRemotePlayerAvatar(avatar: AnimatedAvatar): void {
+    avatar.fbxMixer?.stopAllAction();
+    this.disposeProceduralObject(avatar.proceduralRoot);
+    this.disposeProceduralObject(avatar.targetRing);
+    // Only dispose non-FBX equipment meshes so shared Tikaf.fbx geometry & material in ModelAssetCache stay intact
+    if (avatar.fbxRoot) {
+      avatar.fbxRoot.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (!mesh.isMesh || (obj as THREE.SkinnedMesh).isSkinnedMesh) return;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const usesSharedTexture = mats.some((m) => Boolean((m as THREE.MeshStandardMaterial | undefined)?.map));
+        if (usesSharedTexture) return;
+        mesh.geometry?.dispose();
+        for (const m of mats) {
+          if (m) m.dispose();
+        }
+      });
+    }
+  }
+
   private createNameplate(label: string, textColor: string, barColor: string): HTMLDivElement {
     const el = document.createElement('div');
     el.className = 'nameplate';
@@ -1675,6 +1709,14 @@ class SymfonyForeverGame {
     let closestDist = 17.0;
 
     for (const [code, entry] of this.npcs) {
+      const d = Math.hypot(entry.data.x - this.controller.x, entry.data.z - this.controller.z);
+      const nearby = d <= 220.0;
+      entry.visual.group.visible = nearby;
+      if (!nearby) {
+        entry.nameplate.style.display = 'none';
+        continue;
+      }
+
       const marker = this.questState?.npcMarkers[code] ?? 'NONE';
       const showCrystal = marker === 'AVAILABLE' || marker === 'TURN_IN';
       entry.visual.markerMesh.visible = showCrystal;
@@ -1686,7 +1728,6 @@ class SymfonyForeverGame {
         entry.visual.markerMat.emissive.setHex(col);
       }
 
-      const d = Math.hypot(entry.data.x - this.controller.x, entry.data.z - this.controller.z);
       if (d < closestDist) {
         closestDist = d;
         closestCode = code;
@@ -2034,6 +2075,7 @@ class SymfonyForeverGame {
     for (const [id, entry] of this.lootDrops) {
       if (!seen.has(id)) {
         this.scene.remove(entry.visual.group);
+        this.disposeProceduralObject(entry.visual.group);
         entry.nameplate.remove();
         this.lootDrops.delete(id);
       }

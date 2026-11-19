@@ -10,6 +10,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Entity(repositoryClass: MonsterInstanceRepository::class)]
 #[ORM\Table(name: 'monster_instance')]
 #[ORM\Index(name: 'idx_monster_zone_state', columns: ['zone_code', 'state'])]
+#[ORM\Index(name: 'idx_monster_pos', columns: ['pos_x', 'pos_z'])]
 class MonsterInstance
 {
     public const string STATE_IDLE = 'IDLE';
