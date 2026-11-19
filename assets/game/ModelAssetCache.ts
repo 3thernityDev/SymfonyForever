@@ -46,25 +46,24 @@ function loadTikafTemplate(): Promise<CachedTemplate> {
     loader.load(
       TIKAF_FBX_URL,
       (fbx) => {
-        // Apply texture & clean material lighting
+        // Replace FBX Phong/tinted materials with a clean, bright, non-metallic PBR material
+        // so Tripo's texture renders with faithful vibrant colors from every angle.
+        const tikafMat = new THREE.MeshStandardMaterial({
+          color: 0xffffff,
+          map: sharedTexture,
+          roughness: 0.82,
+          metalness: 0.0,
+          emissive: new THREE.Color(0xffffff),
+          emissiveMap: sharedTexture,
+          emissiveIntensity: 0.24,
+        });
+
         fbx.traverse((child) => {
           const mesh = child as THREE.Mesh;
           if (!mesh.isMesh) return;
           mesh.castShadow = true;
           mesh.receiveShadow = true;
-          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-          mats.forEach((m) => {
-            if (!m) return;
-            const std = m as THREE.MeshPhongMaterial & THREE.MeshStandardMaterial;
-            std.map = sharedTexture;
-            if ('shininess' in std && typeof std.shininess === 'number') {
-              std.shininess = 18;
-            }
-            if ('roughness' in std && typeof std.roughness === 'number') {
-              std.roughness = 0.72;
-            }
-            std.needsUpdate = true;
-          });
+          mesh.material = tikafMat;
         });
 
         // Stand Tikaf upright (compensate +90deg X axis baked into FBX)

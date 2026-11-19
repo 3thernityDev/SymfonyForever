@@ -27,13 +27,20 @@ export class ReunionWorldRenderer {
     scene.background = this.targetSky.clone();
     scene.fog = new THREE.FogExp2(this.targetFog.getHex(), 0.0017);
 
-    // Tropical island lighting
-    this.hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x3b4d36, 0.95);
+    // Balanced tropical island lighting (sun + ambient + opposite sky fill so characters are never silhouette-dark)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.72);
+    scene.add(ambientLight);
+
+    this.hemiLight = new THREE.HemisphereLight(0xeef6ff, 0x7c8a6c, 1.05);
     scene.add(this.hemiLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xfff5dc, 1.45);
-    this.sunLight.position.set(-420, 540, -280);
+    this.sunLight = new THREE.DirectionalLight(0xfff5e0, 1.75);
+    this.sunLight.position.set(-340, 520, 320);
     scene.add(this.sunLight);
+
+    const fillLight = new THREE.DirectionalLight(0xcce7ff, 0.65);
+    fillLight.position.set(360, 280, -340);
+    scene.add(fillLight);
 
     // 1. Displaced Terrain Geometry (256 x 256 grid over 2048 x 2048 world units)
     const segs = 256;

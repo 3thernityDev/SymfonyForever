@@ -25,11 +25,17 @@ if (panel && canvas && hiddenInput) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(canvas.clientWidth || 220, canvas.clientHeight || 230, false);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
 
-  scene.add(new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 1.1));
-  const keyLight = new THREE.DirectionalLight(0xfff1d6, 1.5);
-  keyLight.position.set(3, 6, 4);
+  scene.add(new THREE.AmbientLight(0xffffff, 1.1));
+  scene.add(new THREE.HemisphereLight(0xeef6ff, 0x475569, 0.95));
+  const keyLight = new THREE.DirectionalLight(0xfff5e6, 2.1);
+  keyLight.position.set(3, 5, 4);
   scene.add(keyLight);
+  const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.7);
+  rimLight.position.set(-3, 2, -3);
+  scene.add(rimLight);
 
   // Basalt pedestal
   const pedestal = new THREE.Mesh(
