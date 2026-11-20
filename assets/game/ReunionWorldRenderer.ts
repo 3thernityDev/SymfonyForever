@@ -378,9 +378,9 @@ export class ReunionWorldRenderer {
     this.renderTorchInstances();
     this.buildDistantNightLights();
 
-    // Pool of 10 dynamic PointLights bound dynamically to nearest torches/campfires around player
-    for (let i = 0; i < 10; i++) {
-      const pl = new THREE.PointLight(0xff8c32, 0, 64, 1.15);
+    // Pool of 12 dynamic PointLights bound dynamically to nearest torches/campfires around player
+    for (let i = 0; i < 12; i++) {
+      const pl = new THREE.PointLight(0xff9238, 0, 96, 0.88);
       scene.add(pl);
       this.torchLightPool.push(pl);
     }
@@ -508,7 +508,10 @@ export class ReunionWorldRenderer {
     const fog = this.scene.fog as THREE.Fog;
     fog.color.lerp(this.cFog, Math.min(1, dt * 4.5));
 
-    // Linear visibility distance: crisp 50m max cutoff from player at night without light sources
+    const torchLightBoost = this.updateTorchLightPool(playerPos, elapsed, nightFactor, goldenFactor);
+
+    // Linear visibility distance: crisp 50m max cutoff from player at night without light sources,
+    // expanding naturally when illuminated by nearby roadside or village torches/campfires
     let dayNear = 240;
     let dayFar = 2050;
     dayNear = THREE.MathUtils.lerp(dayNear, 70, weather.rainFactor);
@@ -519,10 +522,10 @@ export class ReunionWorldRenderer {
     dayFar = THREE.MathUtils.lerp(dayFar, 175, weather.sandstormFactor);
 
     const camDist = Math.max(6, cameraDistToPlayer);
-    const nightNear = camDist + 4;
+    const nightNear = camDist + 4 + torchLightBoost * 20;
     const nightFar = Math.max(
       camDist + 16,
-      camDist + 48 - weather.stormFactor * 6 - weather.sandstormFactor * 12 + weather.lightningFlash * 85,
+      camDist + 48 + torchLightBoost * 46 - weather.stormFactor * 6 - weather.sandstormFactor * 12 + weather.lightningFlash * 85,
     );
 
     const targetNear = THREE.MathUtils.lerp(dayNear, nightNear, Math.pow(nightFactor, 0.7));
@@ -605,8 +608,6 @@ export class ReunionWorldRenderer {
       cf.mesh.position.y = cf.baseY + Math.sin(elapsed * 9 + cf.phase) * 0.06;
     }
 
-    this.updateTorchLightPool(playerPos, elapsed, nightFactor, goldenFactor);
-
     if (this.distantLightsMat) {
       this.distantLightsMat.uniforms['uTime'].value = elapsed;
       this.distantLightsMat.uniforms['uNightGlow'].value = THREE.MathUtils.clamp(nightFactor + goldenFactor * 0.32, 0, 1);
@@ -641,33 +642,43 @@ export class ReunionWorldRenderer {
     };
   }
 
-  private updateTorchLightPool(playerPos: THREE.Vector3, elapsed: number, nightFactor: number, goldenFactor: number): void {
+  private updateTorchLightPool(playerPos: THREE.Vector3, elapsed: number, nightFactor: number, goldenFactor: number): number {
     const scored: { d2: number; t: TorchSite }[] = [];
     for (let i = 0; i < this.torchSites.length; i++) {
       const t = this.torchSites[i];
       const dx = t.x - playerPos.x;
       const dz = t.z - playerPos.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 <= 220 * 220) {
+      if (d2 <= 280 * 280) {
         scored.push({ d2, t });
       }
     }
     scored.sort((a, b) => a.d2 - b.d2);
 
-    const baseStrength = 0.32 + goldenFactor * 1.85 + nightFactor * 7.2;
+    const baseStrength = 0.42 + goldenFactor * 2.8 + nightFactor * 14.8;
+    let lightBoost = 0;
+
     for (let i = 0; i < this.torchLightPool.length; i++) {
       const pl = this.torchLightPool[i];
       if (i < scored.length) {
         const site = scored[i].t;
-        const flick = 0.85 + Math.sin(elapsed * 10.2 + site.phase) * 0.12 + Math.cos(elapsed * 17.1 + site.phase) * 0.08;
-        pl.position.set(site.x, site.y + (site.isCampfire ? 1.6 : 3.6), site.z);
-        pl.distance = site.isCampfire ? 78 : 64;
-        pl.decay = 1.15;
-        pl.intensity = baseStrength * (site.isCampfire ? 1.35 : 1.0) * flick;
+        const dist = Math.sqrt(scored[i].d2);
+        const reach = site.isCampfire ? 118 : 96;
+        if (dist < reach) {
+          const contrib = Math.pow(1 - dist / reach, 0.75) * (site.isCampfire ? 1.0 : 0.82);
+          if (contrib > lightBoost) lightBoost = contrib;
+        }
+        const flick = 0.88 + Math.sin(elapsed * 10.2 + site.phase) * 0.10 + Math.cos(elapsed * 17.1 + site.phase) * 0.07;
+        pl.position.set(site.x, site.y + (site.isCampfire ? 1.8 : 3.8), site.z);
+        pl.distance = reach;
+        pl.decay = 0.88;
+        pl.intensity = baseStrength * (site.isCampfire ? 1.45 : 1.0) * flick;
       } else {
         pl.intensity = 0;
       }
     }
+
+    return THREE.MathUtils.clamp(lightBoost, 0, 1);
   }
 
   private buildClearZones(
@@ -1577,7 +1588,7 @@ export class ReunionWorldRenderer {
           y: t.y + 1.65,
           z: t.z,
           color: 0xff7b24,
-          poolSize: 32,
+          poolSize: 44,
           minPx: 6.5,
           phase: t.phase,
         });
@@ -1587,7 +1598,7 @@ export class ReunionWorldRenderer {
           y: t.y + 3.65,
           z: t.z,
           color: 0xff9a3c,
-          poolSize: 18,
+          poolSize: 28,
           minPx: 4.5,
           phase: t.phase,
         });
@@ -1690,8 +1701,8 @@ export class ReunionWorldRenderer {
           if (r > 1.0) discard;
 
           float flick = 0.88 + 0.08 * sin(uTime * 8.5 + vPhase) + 0.04 * cos(uTime * 15.2 + vPhase * 1.7);
-          float poolFadeIn = smoothstep(26.0, 68.0, vDist);
-          float poolGlow = pow(max(0.0, 1.0 - r), 2.8) * 0.40 * poolFadeIn;
+          float poolFadeIn = smoothstep(14.0, 52.0, vDist);
+          float poolGlow = pow(max(0.0, 1.0 - r), 2.15) * 0.56 * poolFadeIn;
 
           float coreRadiusUv = clamp((2.6 * uPixelRatio) / max(vPointSizePx, 1.0), 0.04, 0.58);
           float cr = r / coreRadiusUv;
