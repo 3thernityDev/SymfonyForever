@@ -407,9 +407,24 @@ class SymfonyForeverGame {
       this.worldRenderer.applyZoneAtmosphere(resp.zone);
       this.showZoneBanner(resp.zone.name, `${resp.zone.subtitle} · Niv. ${resp.zone.minLevel}–${resp.zone.maxLevel}`);
       const zName = document.getElementById('zone-name');
-      const zSub = document.getElementById('zone-sub');
       if (zName) zName.textContent = resp.zone.name;
-      if (zSub) zSub.textContent = `Niv. ${resp.zone.minLevel}–${resp.zone.maxLevel}`;
+    }
+
+    if (resp.zone) {
+      const zSub = document.getElementById('zone-sub');
+      if (zSub) {
+        const baseLvl = `Niv. ${resp.zone.minLevel}–${resp.zone.maxLevel}`;
+        const mult = typeof resp.respawnMultiplier === 'number' ? resp.respawnMultiplier : 1.0;
+        const zCount = typeof resp.zonePlayerCount === 'number' ? resp.zonePlayerCount : 1;
+        if (mult > 1.0) {
+          const multText = mult.toFixed(2).replace(/\.?0+$/, '');
+          zSub.textContent = `${baseLvl} · Spawn ×${multText}`;
+          zSub.title = `${zCount} joueurs dans la zone — réapparition accélérée (×${multText})`;
+        } else {
+          zSub.textContent = baseLvl;
+          zSub.title = `${zCount} joueur dans la zone — réapparition normale (×1)`;
+        }
+      }
     }
 
     // Reconcile remote players

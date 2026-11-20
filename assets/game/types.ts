@@ -390,6 +390,8 @@ export interface SyncResponse {
   serverTime: number;
   correctedPosition: boolean;
   onlineCount?: number;
+  zonePlayerCount?: number;
+  respawnMultiplier?: number;
   self: SelfState;
   zone: ZoneMeta;
   players: PublicPlayer[];

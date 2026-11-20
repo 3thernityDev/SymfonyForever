@@ -10,6 +10,7 @@ use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Game\CharacterClass;
 use App\Game\ItemRegistry;
+use App\Game\MonsterRespawnScaler;
 use App\Game\SkillDefinition;
 use App\Game\SkillRegistry;
 use App\Repository\CharacterRepository;
@@ -355,7 +356,15 @@ final class CombatService
         $monster->setTauntExpiresAt(0.0);
         $monster->setPhase(1);
         $monster->setLastSpecialAt(0.0);
-        $monster->setRespawnAt($now + $template->getRespawnSeconds());
+        $zonePlayerCount = $this->characterRepository->countOnlineInZone($monster->getZoneCode(), $now);
+        if (
+            $killer !== null
+            && $killer->getZoneCode() === $monster->getZoneCode()
+            && $killer->getLastSeenAt() < ($now - CharacterRepository::ONLINE_WINDOW_SECONDS)
+        ) {
+            ++$zonePlayerCount;
+        }
+        $monster->setRespawnAt($now + MonsterRespawnScaler::computeRespawnSeconds($template, $zonePlayerCount));
 
         $killEvent = new CombatEvent(
             $monster->getZoneCode(),

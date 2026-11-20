@@ -77,6 +77,18 @@ class CharacterRepository extends ServiceEntityRepository
         return $result;
     }
 
+    public function countOnlineInZone(string $zoneCode, float $now): int
+    {
+        return (int) $this->createQueryBuilder('c')
+            ->select('COUNT(c.id)')
+            ->where('c.zoneCode = :zone')
+            ->andWhere('c.lastSeenAt >= :cutoff')
+            ->setParameter('zone', $zoneCode)
+            ->setParameter('cutoff', $now - self::ONLINE_WINDOW_SECONDS)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
     public function findOneByNameInsensitive(string $name): ?Character
     {
         return $this->createQueryBuilder('c')

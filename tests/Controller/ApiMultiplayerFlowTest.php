@@ -76,6 +76,8 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertResponseIsSuccessful();
         $sync = json_decode((string) $this->client->getResponse()->getContent(), true);
         self::assertSame('lagon_ouest', $sync['zone']['code']);
+        self::assertGreaterThanOrEqual(1, $sync['zonePlayerCount']);
+        self::assertGreaterThanOrEqual(1.0, $sync['respawnMultiplier']);
         self::assertNotEmpty($sync['monsters']);
 
         // Pick closest monster & move next to it using the current kernel's EntityManager

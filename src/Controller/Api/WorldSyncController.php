@@ -7,6 +7,7 @@ namespace App\Controller\Api;
 use App\Entity\Character;
 use App\Entity\User;
 use App\Game\ItemRegistry;
+use App\Game\MonsterRespawnScaler;
 use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
@@ -181,10 +182,15 @@ final class WorldSyncController extends AbstractController
             $pendingInvitePartyName = 'Groupe #'.$character->getPendingPartyInviteId();
         }
 
+        $zonePlayerCount = max(1, $characterRepository->countOnlineInZone($zoneCode, $now));
+        $respawnMultiplier = MonsterRespawnScaler::computeSpeedMultiplier($zonePlayerCount);
+
         return $this->json([
             'serverTime' => round($now, 3),
             'correctedPosition' => $correctedPosition,
             'onlineCount' => $characterRepository->countOnline($now),
+            'zonePlayerCount' => $zonePlayerCount,
+            'respawnMultiplier' => $respawnMultiplier,
             'self' => $payloadBuilder->buildSelf($character, $now),
             'zone' => WorldCatalog::zones()[$zoneCode] ?? WorldCatalog::zones()['lagon_ouest'],
             'players' => array_map(

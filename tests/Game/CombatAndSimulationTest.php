@@ -11,6 +11,7 @@ use App\Entity\Party;
 use App\Entity\User;
 use App\Entity\Zone;
 use App\Game\CharacterClass;
+use App\Game\MonsterRespawnScaler;
 use App\Game\WorldCatalog;
 use App\Repository\MonsterTemplateRepository;
 use App\Service\Game\CombatService;
@@ -356,5 +357,177 @@ final class CombatAndSimulationTest extends KernelTestCase
         $heal->setIntelligence($heal->getIntelligence() + 30);
         $healWithInt = $normAa($heal, $now + 16.0);
         self::assertGreaterThan($healBase * 1.5, $healWithInt, 'L\'INT doit nettement augmenter l\'auto-attaque du Heal.');
+    }
+
+    public function testDynamicMobRespawnAcceleratesWithZonePopulation(): void
+    {
+        // 1. Pure scaler: monotonic speedup, caps & floors across regular, elite & world boss templates
+        $reg24 = (new MonsterTemplate('reg24', 'Tangue Test'))->setRespawnSeconds(24);
+        $reg10 = (new MonsterTemplate('reg10', 'Crabe Rapide'))->setRespawnSeconds(10);
+        $reg2 = (new MonsterTemplate('reg2', 'Micro Crabe'))->setRespawnSeconds(2);
+        $elite42 = (new MonsterTemplate('elite42', 'Colosse Test'))->setRespawnSeconds(42)->setIsBoss(true);
+        $wb180 = (new MonsterTemplate('wb180', 'Boss Dolomieu Test'))->setRespawnSeconds(180)->setIsBoss(true)->setIsWorldBoss(true);
+        $wb120 = (new MonsterTemplate('wb120', 'Boss Rapide Test'))->setRespawnSeconds(120)->setIsBoss(true)->setIsWorldBoss(true);
+
+        self::assertSame(1.0, MonsterRespawnScaler::computeSpeedMultiplier(1));
+        self::assertSame(24.0, MonsterRespawnScaler::computeRespawnSeconds($reg24, 1));
+        self::assertSame(2.0, MonsterRespawnScaler::computeSpeedMultiplier(5));
+        self::assertSame(12.0, MonsterRespawnScaler::computeRespawnSeconds($reg24, 5));
+        self::assertSame(3.25, MonsterRespawnScaler::computeSpeedMultiplier(10));
+        self::assertSame(7.38, MonsterRespawnScaler::computeRespawnSeconds($reg24, 10));
+        self::assertSame(4.0, MonsterRespawnScaler::computeSpeedMultiplier(13));
+        self::assertSame(6.0, MonsterRespawnScaler::computeRespawnSeconds($reg24, 13));
+        self::assertSame(4.0, MonsterRespawnScaler::computeSpeedMultiplier(25));
+        self::assertSame(6.0, MonsterRespawnScaler::computeRespawnSeconds($reg24, 25));
+
+        self::assertSame(4.0, MonsterRespawnScaler::computeRespawnSeconds($reg10, 13));
+        self::assertSame(2.0, MonsterRespawnScaler::computeRespawnSeconds($reg2, 13));
+        self::assertSame(12.0, MonsterRespawnScaler::computeRespawnSeconds($elite42, 13));
+
+        self::assertSame(1.0, MonsterRespawnScaler::computeSpeedMultiplier(1, true));
+        self::assertSame(180.0, MonsterRespawnScaler::computeRespawnSeconds($wb180, 1));
+        self::assertSame(2.0, MonsterRespawnScaler::computeSpeedMultiplier(11, true));
+        self::assertSame(90.0, MonsterRespawnScaler::computeRespawnSeconds($wb180, 11));
+        self::assertSame(3.0, MonsterRespawnScaler::computeSpeedMultiplier(21, true));
+        self::assertSame(60.0, MonsterRespawnScaler::computeRespawnSeconds($wb180, 21));
+        self::assertSame(3.0, MonsterRespawnScaler::computeSpeedMultiplier(30, true));
+        self::assertSame(60.0, MonsterRespawnScaler::computeRespawnSeconds($wb180, 30));
+        self::assertSame(45.0, MonsterRespawnScaler::computeRespawnSeconds($wb120, 21));
+
+        // 2. Solo zone (1 online player in lagon_ouest): 24s respawn
+        $now = 20000.0;
+        $lagon = (new Zone('lagon_ouest', 'Lagon'))->setLastTickAt($now - 5.0);
+        $this->em->persist($lagon);
+
+        $user = (new User())->setUsername('respawn_u')->setEmail('respawn@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $tpl = (new MonsterTemplate('respawn_mob', 'Crabe Chronométré'))
+            ->setLevel(1)->setMaxHp(100)->setAttack(5)->setDefense(0)->setXpReward(10)->setRespawnSeconds(24);
+        $this->em->persist($tpl);
+
+        $heroSolo = (new Character($user, 'SoloTimer', CharacterClass::DPS))
+            ->setLevel(3)->setZoneCode('lagon_ouest')->setPosX(0.0)->setPosY(12.0)->setPosZ(0.0)->setLastSeenAt($now);
+        $hs = $this->stats->compute($heroSolo, $now);
+        $heroSolo->setCurrentHp($hs['maxHp'])->setCurrentMp($hs['maxMp']);
+        $this->em->persist($heroSolo);
+
+        $m1 = (new MonsterInstance($tpl, 'lagon_ouest', 0.0, 12.0, 3.0))->setCurrentHp(5);
+        $this->em->persist($m1);
+        $this->em->flush();
+
+        $kill1 = $this->combat->castSkill($heroSolo, 'ember_strike', 'MONSTER', $m1->getId(), $now);
+        self::assertTrue($kill1['ok']);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m1->getState());
+        self::assertEqualsWithDelta($now + 24.0, $m1->getRespawnAt(), 0.05);
+
+        $heroSolo->setLastSeenAt($now + 13.0);
+        $this->em->flush();
+        $this->sim->maybeTickZone('lagon_ouest', $now + 13.0);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m1->getState());
+
+        $heroSolo->setLastSeenAt($now + 24.5);
+        $this->em->flush();
+        $this->sim->maybeTickZone('lagon_ouest', $now + 24.5);
+        self::assertSame(MonsterInstance::STATE_IDLE, $m1->getState());
+        self::assertSame(100, $m1->getCurrentHp());
+
+        // 3. Populated zone (5 players in lagon_ouest + 3 isolated players in salazie): 2.0x -> 12s respawn
+        $t2 = 25000.0;
+        $heroSolo->setLastSeenAt($t2)->setCurrentHp($hs['maxHp'])->setCurrentMp($hs['maxMp']);
+        $lagonExtras = [];
+        for ($i = 2; $i <= 5; ++$i) {
+            $extra = (new Character($user, 'LagonP'.$i, CharacterClass::DPS))
+                ->setLevel(3)->setZoneCode('lagon_ouest')->setPosX(10.0 * $i)->setPosY(12.0)->setPosZ(0.0)->setLastSeenAt($t2);
+            $es = $this->stats->compute($extra, $t2);
+            $extra->setCurrentHp($es['maxHp'])->setCurrentMp($es['maxMp']);
+            $this->em->persist($extra);
+            $lagonExtras[] = $extra;
+        }
+        for ($i = 1; $i <= 3; ++$i) {
+            $sal = (new Character($user, 'SalazieP'.$i, CharacterClass::DPS))
+                ->setLevel(12)->setZoneCode('salazie')->setPosX(500.0)->setPosY(12.0)->setPosZ(500.0)->setLastSeenAt($t2);
+            $ss = $this->stats->compute($sal, $t2);
+            $sal->setCurrentHp($ss['maxHp'])->setCurrentMp($ss['maxMp']);
+            $this->em->persist($sal);
+        }
+
+        $m2 = (new MonsterInstance($tpl, 'lagon_ouest', 0.0, 12.0, 3.0))->setCurrentHp(5);
+        $this->em->persist($m2);
+        $this->em->flush();
+
+        $kill2 = $this->combat->castSkill($heroSolo, 'ember_strike', 'MONSTER', $m2->getId(), $t2);
+        self::assertTrue($kill2['ok']);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m2->getState());
+        self::assertEqualsWithDelta($t2 + 12.0, $m2->getRespawnAt(), 0.05);
+
+        $lagonPlayers = array_merge([$heroSolo], $lagonExtras);
+        foreach ($lagonPlayers as $lp) {
+            $lp->setLastSeenAt($t2 + 11.0);
+        }
+        $this->em->flush();
+        $this->sim->maybeTickZone('lagon_ouest', $t2 + 11.0);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m2->getState());
+
+        foreach ($lagonPlayers as $lp) {
+            $lp->setLastSeenAt($t2 + 12.5);
+        }
+        $this->em->flush();
+        $this->sim->maybeTickZone('lagon_ouest', $t2 + 12.5);
+        self::assertSame(MonsterInstance::STATE_IDLE, $m2->getState());
+        self::assertSame(100, $m2->getCurrentHp());
+
+        // 4. Mid-wait population surge in cilaos: killed at 1 player (24s), then 9 more arrive at t3+2s (10 players -> 7.38s cap)
+        $t3 = 30000.0;
+        $cilaos = (new Zone('cilaos', 'Cilaos'))->setLastTickAt($t3 - 5.0);
+        $this->em->persist($cilaos);
+
+        $cilaosLead = (new Character($user, 'CilaosP1', CharacterClass::DPS))
+            ->setLevel(30)->setZoneCode('cilaos')->setPosX(100.0)->setPosY(12.0)->setPosZ(100.0)->setLastSeenAt($t3);
+        $cs = $this->stats->compute($cilaosLead, $t3);
+        $cilaosLead->setCurrentHp($cs['maxHp'])->setCurrentMp($cs['maxMp']);
+        $this->em->persist($cilaosLead);
+
+        $m3 = (new MonsterInstance($tpl, 'cilaos', 103.0, 12.0, 100.0))->setCurrentHp(5);
+        $this->em->persist($m3);
+        $this->em->flush();
+
+        $kill3 = $this->combat->castSkill($cilaosLead, 'ember_strike', 'MONSTER', $m3->getId(), $t3);
+        self::assertTrue($kill3['ok']);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m3->getState());
+        self::assertEqualsWithDelta($t3 + 24.0, $m3->getRespawnAt(), 0.05);
+
+        $cilaosPlayers = [$cilaosLead];
+        $cilaosLead->setLastSeenAt($t3 + 2.0);
+        for ($i = 2; $i <= 10; ++$i) {
+            $cp = (new Character($user, 'CilaosP'.$i, CharacterClass::DPS))
+                ->setLevel(30)->setZoneCode('cilaos')->setPosX(100.0 + $i)->setPosY(12.0)->setPosZ(100.0)->setLastSeenAt($t3 + 2.0);
+            $cps = $this->stats->compute($cp, $t3 + 2.0);
+            $cp->setCurrentHp($cps['maxHp'])->setCurrentMp($cps['maxMp']);
+            $this->em->persist($cp);
+            $cilaosPlayers[] = $cp;
+        }
+        $this->em->flush();
+
+        $this->sim->maybeTickZone('cilaos', $t3 + 2.0);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m3->getState());
+        self::assertEqualsWithDelta($t3 + 9.38, $m3->getRespawnAt(), 0.05);
+
+        // Subsequent tick at constant population must NOT double-count acceleration
+        foreach ($cilaosPlayers as $cp) {
+            $cp->setLastSeenAt($t3 + 4.0);
+        }
+        $this->em->flush();
+        $this->sim->maybeTickZone('cilaos', $t3 + 4.0);
+        self::assertSame(MonsterInstance::STATE_DEAD, $m3->getState());
+        self::assertEqualsWithDelta($t3 + 9.38, $m3->getRespawnAt(), 0.05);
+
+        foreach ($cilaosPlayers as $cp) {
+            $cp->setLastSeenAt($t3 + 10.0);
+        }
+        $this->em->flush();
+        $this->sim->maybeTickZone('cilaos', $t3 + 10.0);
+        self::assertSame(MonsterInstance::STATE_IDLE, $m3->getState());
+        self::assertSame(100, $m3->getCurrentHp());
     }
 }

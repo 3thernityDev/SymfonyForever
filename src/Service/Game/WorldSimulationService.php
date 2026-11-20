@@ -10,6 +10,7 @@ use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Entity\Zone;
 use App\Game\CharacterClass;
+use App\Game\MonsterRespawnScaler;
 use App\Repository\CharacterRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
@@ -214,6 +215,12 @@ final class WorldSimulationService
 
         // Respawn check
         if ($monster->getState() === MonsterInstance::STATE_DEAD) {
+            $effectiveRespawn = MonsterRespawnScaler::computeRespawnSeconds($template, count($playersById));
+            $maxRespawnAt = $now + $effectiveRespawn;
+            if ($monster->getRespawnAt() > $maxRespawnAt) {
+                $monster->setRespawnAt($maxRespawnAt);
+            }
+
             if ($monster->getRespawnAt() <= $now) {
                 $monster->setState(MonsterInstance::STATE_IDLE);
                 $monster->setCurrentHp($template->getMaxHp());
