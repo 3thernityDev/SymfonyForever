@@ -134,4 +134,71 @@ final class QuestSystemTest extends KernelTestCase
         self::assertTrue($done3['ok']);
         self::assertSame(180, $done3['rewardXp']);
     }
+
+    public function testEveryVillageHasAtLeastOneNpcPerFiveHousesWithZoneQuests(): void
+    {
+        $questRegistry = self::getContainer()->get(\App\Game\QuestRegistry::class);
+        $villages = \App\Game\WorldCatalog::villages();
+        self::assertGreaterThanOrEqual(24, count($villages));
+
+        foreach ($villages as $village) {
+            $expectedMinNpcs = max(1, (int) ceil($village['houses'] / 5.0));
+            $villageNpcs = $this->npcs->byVillage($village['code']);
+
+            self::assertGreaterThanOrEqual(
+                $expectedMinNpcs,
+                count($villageNpcs),
+                sprintf(
+                    'La ville %s (%d maisons) doit comporter au moins %d PNJ (1 par groupe de 5 maisons).',
+                    $village['name'],
+                    $village['houses'],
+                    $expectedMinNpcs,
+                ),
+            );
+
+            foreach ($villageNpcs as $npc) {
+                self::assertSame($village['zoneCode'], $npc->zoneCode);
+                $npcQuests = $questRegistry->forNpc($npc->code);
+                self::assertNotEmpty(
+                    $npcQuests,
+                    sprintf('Le PNJ %s de %s doit proposer au moins une quête pour la zone %s.', $npc->code, $village['name'], $village['zoneCode']),
+                );
+            }
+        }
+
+        // Verify accepting and completing a secondary town quest (e.g. in Saint-Leu, lagon_ouest)
+        $saintLeuNpcs = $this->npcs->byVillage('saint_leu');
+        self::assertGreaterThanOrEqual(3, count($saintLeuNpcs));
+        $townNpc = $saintLeuNpcs[0];
+        $townQuest = $questRegistry->forNpc($townNpc->code)[0];
+
+        $now = 75000.0;
+        $user = (new User())->setUsername('town_quester')->setEmail('tq@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $npcPos = $this->npcs->resolvedPosition($townNpc, $this->terrain);
+        $hero = (new Character($user, 'Citoyen974', CharacterClass::DPS))
+            ->setLevel(max(1, $townQuest->minLevel))
+            ->setPosX($npcPos['x'] + 1.5)->setPosY($npcPos['y'])->setPosZ($npcPos['z'])
+            ->setZoneCode($townNpc->zoneCode)
+            ->setLastSeenAt($now);
+        $stats = self::getContainer()->get(StatCalculator::class)->compute($hero, $now);
+        $hero->setCurrentHp($stats['maxHp'])->setCurrentMp($stats['maxMp']);
+        $this->em->persist($hero);
+        $this->em->flush();
+
+        $acc = $this->quests->acceptQuest($hero, $townQuest->code);
+        self::assertTrue($acc['ok'], $acc['error'] ?? '');
+
+        $tpl = self::getContainer()->get(MonsterTemplateRepository::class)->findOneByCode($townQuest->targetCode);
+        self::assertNotNull($tpl);
+        for ($i = 0; $i < $townQuest->targetCount; ++$i) {
+            $this->quests->onMonsterKilled($hero, $tpl);
+        }
+        $this->em->flush();
+
+        $done = $this->quests->completeQuest($hero, $townQuest->code, $now + 10.0);
+        self::assertTrue($done['ok'], $done['error'] ?? '');
+        self::assertSame($townQuest->rewardXp, $done['rewardXp']);
+    }
 }

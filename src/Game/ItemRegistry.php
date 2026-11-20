@@ -625,10 +625,27 @@ final class ItemRegistry
             'ticoq_guide' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'cuirasse_mafate'],
             'maitre_thermalis' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'nectar_piton', 'heaume_cilaos', 'amulette_cirques'],
             'capitaine_basalte', 'eclaireuse_maido', 'vulcanologue_piton' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'nectar_piton', 'lame_obsidienne', 'cuirasse_mafate', 'amulette_cirques'],
-            default => ['tisane_soin', 'eau_cilaos'],
+            default => $this->resolveVillageNpcBaseStock($npcCode),
         };
 
         return [...$base, 'mount_sol_60', 'mount_sol_100', 'mount_vol_100'];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function resolveVillageNpcBaseStock(string $npcCode): array
+    {
+        $npc = (new NpcRegistry())->get($npcCode);
+        $zoneCode = $npc?->zoneCode ?? 'lagon_ouest';
+
+        return match ($zoneCode) {
+            'lagon_ouest' => ['tisane_soin', 'eau_cilaos', 'lame_corail', 'baton_filao', 'tunique_lagon', 'chapeau_vacoua', 'collier_coquillage'],
+            'salazie' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'machette_salazie', 'sceptre_cascades'],
+            'mafate' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'cuirasse_mafate'],
+            'cilaos' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'nectar_piton', 'heaume_cilaos', 'amulette_cirques'],
+            default => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'nectar_piton', 'lame_obsidienne', 'cuirasse_mafate', 'amulette_cirques'],
+        };
     }
 
     /**

@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Game;
 
 /**
- * Progressive 10-quest storyline guiding players from Level 1 (Saint-Gilles Lagoon)
- * all the way to Level 60+ (Piton de la Fournaise / Seigneur du Dolomieu Niv. 65).
+ * Progressive 10-quest main storyline guiding players from Level 1 (Saint-Gilles Lagoon)
+ * to Level 60+ (Piton de la Fournaise / Seigneur du Dolomieu Niv. 65), supplemented by
+ * local town quests for every NPC across all 26 villages of La Réunion in their respective zone.
  */
 final class QuestRegistry
 {
@@ -214,6 +215,116 @@ final class QuestRegistry
         foreach ($definitions as $quest) {
             $this->quests[$quest->code] = $quest;
         }
+
+        $this->registerVillageZoneQuests();
+    }
+
+    /**
+     * Generates zone-matched quests for every village NPC across the 26 towns & villages of La Réunion.
+     */
+    private function registerVillageZoneQuests(): void
+    {
+        $zoneFaunaSpecs = [
+            'lagon_ouest' => [
+                ['crabe_recif', 'Crabes de Récif vaincus', 'Protection des Plages', 1, 2, 3, 140, -1975.0, -345.0],
+                ['tangue_sauvage', 'Tangues Épineux vaincus', 'Veille sous les Filaos', 1, 3, 3, 250, -1890.0, -310.0],
+                ['guepe_cotiere', 'Guêpes des Filaos vaincues', 'Essaims de la Côte Ouest', 2, 5, 3, 420, -1790.0, -265.0],
+                ['endormi_bourbon', 'Endormis de Bourbon vaincus', 'Caméléons des Ravines', 3, 7, 3, 620, -1740.0, -420.0],
+                ['paille_en_queue', 'Pailles-en-Queue Furieux vaincus', 'Ailes Blanches des Falaises', 4, 9, 3, 840, -1760.0, -140.0],
+            ],
+            'salazie' => [
+                ['tec_tec_foret', 'Tec-Tec des Cascades vaincus', 'Plumes de la Ravine', 10, 11, 3, 1850, 255.0, -920.0],
+                ['sanglier_salazie', 'Sangliers de Salazie vaincus', 'Défense des Chouchouteraies', 10, 13, 3, 2400, 390.0, -1080.0],
+                ['zoizo_lunettes', 'Oiseaux Blancs de Bourbon vaincus', 'Nuées de Bélouve', 11, 15, 3, 3100, 435.0, -1010.0],
+                ['papangue_feroce', 'Papangues Féroces vaincus', 'Rapaces du Cirque Vert', 12, 17, 3, 3850, 190.0, -860.0],
+            ],
+            'mafate' => [
+                ['tuit_tuit', 'Tuit-Tuit des Remparts vaincus', 'Échos de la Rivière des Galets', 18, 19, 3, 5200, -965.0, -790.0],
+                ['gecko_bourbon', 'Geckos Verts de Bourbon vaincus', 'Sentiers des Orangers', 18, 22, 3, 6300, -820.0, -750.0],
+                ['golem_schiste', 'Golems de Schiste vaincus', 'Éboulis des Îlets', 19, 25, 3, 7300, -910.0, -870.0],
+                ['bibe_mafate', 'Bibes Géantes de Mafate vaincues', 'Toiles des Ravines', 20, 27, 3, 8500, -1020.0, -770.0],
+            ],
+            'cilaos' => [
+                ['oiseau_vert_cilaos', 'Oiseaux Lunettes Verts vaincus', 'Vendanges des Hauts', 27, 29, 3, 10200, -560.0, 470.0],
+                ['cerf_java', 'Cerfs de Java Enragés vaincus', 'Brame sur le Plateau', 27, 31, 3, 11800, -525.0, 540.0],
+                ['merle_peyi', 'Merles Péi des Thermes vaincus', 'Gardiens des Lentilles', 28, 33, 3, 13400, -365.0, 440.0],
+                ['gardien_cilaos', 'Sentinelles des Thermes vaincues', 'Veilleurs du Dimitile', 29, 36, 3, 15200, -495.0, 380.0],
+            ],
+            'sud_sauvage' => [
+                ['gecko_manapany', 'Geckos Verts de Manapany vaincus', 'Falaise de Manapany', 36, 38, 3, 17200, 465.0, 1650.0],
+                ['tortue_bourbon', 'Tortues Géantes de Bourbon vaincues', 'Carapaces de Basalte', 36, 40, 3, 19000, 595.0, 1785.0],
+                ['lezard_obsidienne', 'Lézards d\'Obsidienne vaincus', 'Coulées du Grand Sud', 37, 42, 3, 20800, 665.0, 1790.0],
+                ['scolopendre_basalte', 'Scolopendres du Grand Brûlé vaincus', 'Venin sous les Vacoas', 38, 45, 3, 23200, 765.0, 1735.0],
+            ],
+            'piton_neiges' => [
+                ['petrel_barau', 'Pétrels de Barau vaincus', 'Cimes du Coteau Kerveguen', 45, 48, 3, 27500, -325.0, -85.0],
+                ['papillon_salazie', 'Papillons La Pâture vaincus', 'Brumes de Caverne Dufour', 46, 52, 3, 31000, -410.0, -205.0],
+            ],
+            'fournaise' => [
+                ['roussette_bourbon', 'Roussettes Noires de Bourbon vaincues', 'Vols sur l\'Enclos', 53, 55, 3, 38000, 990.0, 790.0],
+                ['ibis_reunion', 'Solitaires de La Réunion vaincus', 'Vestiges Volcaniques', 53, 57, 3, 41500, 1110.0, 745.0],
+                ['molosse_magma', 'Molosses de Magma vaincus', 'Sentinelles des Scories', 54, 59, 3, 45000, 1180.0, 845.0],
+                ['chouette_bourbon', 'Petits-Ducs de Bourbon vaincus', 'Gardiens de Sainte-Rose', 55, 60, 3, 48500, 1320.0, 935.0],
+            ],
+        ];
+
+        $villagesByCode = [];
+        foreach (WorldCatalog::villages() as $v) {
+            $villagesByCode[$v['code']] = $v;
+        }
+        $zonesMeta = WorldCatalog::zones();
+
+        $npcRegistry = new NpcRegistry();
+        $order = 101;
+        $specCursorByZone = [];
+
+        foreach ($npcRegistry->all() as $npc) {
+            // Primary camp NPCs already have main storyline quests, but ensure every secondary town NPC has its own local zone quest
+            if (!str_starts_with($npc->code, 'npc_')) {
+                continue;
+            }
+
+            $zCode = $npc->zoneCode;
+            $specs = $zoneFaunaSpecs[$zCode] ?? $zoneFaunaSpecs['lagon_ouest'];
+            $cursor = $specCursorByZone[$zCode] ?? 0;
+            $specCursorByZone[$zCode] = $cursor + 1;
+
+            [$targetCode, $targetLabel, $actionPrefix, $minLvl, $recLvl, $count, $xp, $gx, $gz] = $specs[$cursor % count($specs)];
+            $village = $villagesByCode[$npc->villageCode] ?? null;
+            $villageName = $village['name'] ?? $npc->villageCode;
+            $zoneName = $zonesMeta[$zCode]['name'] ?? $zCode;
+
+            $qCode = 'vq_'.$npc->code;
+            $this->quests[$qCode] = new QuestDefinition(
+                code: $qCode,
+                order: $order++,
+                title: sprintf('%s à %s', $actionPrefix, $villageName),
+                description: sprintf(
+                    'Les habitants de %s ont besoin d\'aide dans la région de %s ! Élimine %d créatures (%s) autour de notre village puis reviens faire ton rapport.',
+                    $villageName,
+                    $zoneName,
+                    $count,
+                    $targetLabel,
+                ),
+                completionText: sprintf(
+                    'Grand merci au nom de tout le village de %s ! Notre territoire dans %s est beaucoup plus sûr grâce à toi.',
+                    $villageName,
+                    $zoneName,
+                ),
+                giverNpcCode: $npc->code,
+                turnInNpcCode: $npc->code,
+                minLevel: $minLvl,
+                recommendedLevel: $recLvl,
+                prerequisiteQuestCode: null,
+                objectiveType: QuestDefinition::TYPE_KILL_MONSTER,
+                targetCode: $targetCode,
+                targetLabel: $targetLabel,
+                targetCount: $count,
+                guideX: $gx,
+                guideZ: $gz,
+                rewardXp: $xp,
+            );
+        }
     }
 
     public function get(string $code): ?QuestDefinition
@@ -230,6 +341,17 @@ final class QuestRegistry
         usort($list, static fn (QuestDefinition $a, QuestDefinition $b): int => $a->order <=> $b->order);
 
         return $list;
+    }
+
+    /**
+     * @return list<QuestDefinition>
+     */
+    public function forNpc(string $npcCode): array
+    {
+        return array_values(array_filter(
+            $this->all(),
+            static fn (QuestDefinition $q): bool => $q->giverNpcCode === $npcCode || $q->turnInNpcCode === $npcCode,
+        ));
     }
 
     /**

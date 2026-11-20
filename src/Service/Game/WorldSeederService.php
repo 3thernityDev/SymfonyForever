@@ -344,26 +344,28 @@ final class WorldSeederService
                 }
 
                 $buddyPos = null;
-                foreach ($radii as $radius) {
-                    for ($deg = 0; $deg < 360; $deg += 45) {
-                        $rad = deg2rad((float) $deg);
-                        $bx = $inst->getSpawnX() + cos($rad) * $radius;
-                        $bz = $inst->getSpawnZ() + sin($rad) * $radius;
-                        if (!$this->terrainService->isWalkable($bx, $bz)) {
-                            continue;
+                foreach ([true, false] as $respectSafeCenters) {
+                    foreach ($radii as $radius) {
+                        for ($deg = 0; $deg < 360; $deg += 45) {
+                            $rad = deg2rad((float) $deg);
+                            $bx = $inst->getSpawnX() + cos($rad) * $radius;
+                            $bz = $inst->getSpawnZ() + sin($rad) * $radius;
+                            if (!$this->terrainService->isWalkable($bx, $bz)) {
+                                continue;
+                            }
+                            if ($this->terrainService->getZoneCode($bx, $bz) !== $zone) {
+                                continue;
+                            }
+                            if ($respectSafeCenters && $this->isInsideSafeCenter($bx, $bz, $safeCenters)) {
+                                continue;
+                            }
+                            $buddyPos = [
+                                'x' => round($bx, 2),
+                                'y' => $this->terrainService->getHeight($bx, $bz),
+                                'z' => round($bz, 2),
+                            ];
+                            break 3;
                         }
-                        if ($this->terrainService->getZoneCode($bx, $bz) !== $zone) {
-                            continue;
-                        }
-                        if ($this->isInsideSafeCenter($bx, $bz, $safeCenters)) {
-                            continue;
-                        }
-                        $buddyPos = [
-                            'x' => round($bx, 2),
-                            'y' => $this->terrainService->getHeight($bx, $bz),
-                            'z' => round($bz, 2),
-                        ];
-                        break 2;
                     }
                 }
 
@@ -393,8 +395,8 @@ final class WorldSeederService
         foreach (WorldCatalog::zones() as $z) {
             $safeCenters[] = [$z['respawnX'], $z['respawnZ'], 55.0];
         }
-        foreach ($this->npcRegistry->all() as $npc) {
-            $safeCenters[] = [$npc->x, $npc->z, 55.0];
+        foreach (WorldCatalog::villages() as $v) {
+            $safeCenters[] = [$v['x'], $v['z'], $v['isZoneCamp'] ? 55.0 : 28.0];
         }
         // Keep Cratère Dolomieu World Boss arena free of stray trash mobs
         $safeCenters[] = [WorldCatalog::scaleCoord(440.0), WorldCatalog::scaleCoord(275.0), 90.0];

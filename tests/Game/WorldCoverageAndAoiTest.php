@@ -56,8 +56,13 @@ final class WorldCoverageAndAoiTest extends KernelTestCase
     public function testAllQuestNpcsSitAtValidCampLocationsInExpectedZones(): void
     {
         $zones = WorldCatalog::zones();
+        $villagesByCode = [];
+        foreach (WorldCatalog::villages() as $v) {
+            $villagesByCode[$v['code']] = $v;
+        }
+
         $npcs = $this->npcRegistry->all();
-        self::assertCount(7, $npcs);
+        self::assertGreaterThanOrEqual(70, count($npcs));
 
         foreach ($npcs as $npc) {
             self::assertTrue(
@@ -71,13 +76,25 @@ final class WorldCoverageAndAoiTest extends KernelTestCase
             $actualZone = $this->terrain->getZoneCode($resolved['x'], $resolved['z']);
             self::assertSame($npc->zoneCode, $actualZone, sprintf('PNJ %s doit être dans la zone %s.', $npc->code, $npc->zoneCode));
 
-            $zMeta = $zones[$npc->zoneCode];
-            $distCamp = hypot($resolved['x'] - $zMeta['respawnX'], $resolved['z'] - $zMeta['respawnZ']);
+            self::assertArrayHasKey($npc->villageCode, $villagesByCode, sprintf('Village %s inconnu pour le PNJ %s.', $npc->villageCode, $npc->code));
+            $vMeta = $villagesByCode[$npc->villageCode];
+            self::assertSame($vMeta['zoneCode'], $npc->zoneCode);
+            $distVillage = hypot($resolved['x'] - $vMeta['x'], $resolved['z'] - $vMeta['z']);
             self::assertLessThanOrEqual(
                 15.0,
-                $distCamp,
-                sprintf('PNJ %s doit être tout près du camp/respawn de %s (dist=%.1fm).', $npc->code, $npc->zoneCode, $distCamp),
+                $distVillage,
+                sprintf('PNJ %s doit être sur la place du village %s (dist=%.1fm).', $npc->code, $npc->villageCode, $distVillage),
             );
+
+            if (!str_starts_with($npc->code, 'npc_')) {
+                $zMeta = $zones[$npc->zoneCode];
+                $distCamp = hypot($resolved['x'] - $zMeta['respawnX'], $resolved['z'] - $zMeta['respawnZ']);
+                self::assertLessThanOrEqual(
+                    15.0,
+                    $distCamp,
+                    sprintf('PNJ principal %s doit être tout près du camp/respawn de %s (dist=%.1fm).', $npc->code, $npc->zoneCode, $distCamp),
+                );
+            }
         }
     }
 

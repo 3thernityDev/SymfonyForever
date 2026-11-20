@@ -239,8 +239,16 @@ final class WorldCatalog
     }
 
     /**
+     * Computes the required number of Quest/Town NPCs for a village: at least 1 NPC per group of 5 houses.
+     */
+    public static function requiredNpcCountForHouses(int $houses): int
+    {
+        return max(1, (int) ceil(max(1, $houses) / 5.0));
+    }
+
+    /**
      * All 26 towns & villages of La Réunion (all 24 communes + Mafate La Nouvelle & Piton des Neiges Caverne Dufour),
-     * linked to their geographic leveling zone and scaled in house count by population.
+     * linked to their geographic leveling zone and scaled in house count & NPC count by population.
      *
      * @return list<array{
      *   code: string,
@@ -250,6 +258,7 @@ final class WorldCatalog
      *   z: float,
      *   population: int,
      *   houses: int,
+     *   npcCount: int,
      *   isZoneCamp: bool
      * }>
      */
@@ -298,10 +307,15 @@ final class WorldCatalog
         ];
 
         return array_map(
-            static fn (array $v): array => [
-                ...$v,
-                'houses' => self::computeHouseCountForPopulation($v['population']),
-            ],
+            static function (array $v): array {
+                $houses = self::computeHouseCountForPopulation($v['population']);
+
+                return [
+                    ...$v,
+                    'houses' => $houses,
+                    'npcCount' => self::requiredNpcCountForHouses($houses),
+                ];
+            },
             $defs,
         );
     }

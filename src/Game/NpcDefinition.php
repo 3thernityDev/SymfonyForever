@@ -17,6 +17,7 @@ final readonly class NpcDefinition
         public float $rotY,
         public string $coatColor,
         public string $accentColor,
+        public string $villageCode = 'saint_paul',
     ) {
     }
 }
