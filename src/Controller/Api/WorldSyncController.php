@@ -8,6 +8,7 @@ use App\Entity\Character;
 use App\Entity\User;
 use App\Game\ItemRegistry;
 use App\Game\MonsterRespawnScaler;
+use App\Game\WorldAtmosphere;
 use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
@@ -191,6 +192,7 @@ final class WorldSyncController extends AbstractController
             'onlineCount' => $characterRepository->countOnline($now),
             'zonePlayerCount' => $zonePlayerCount,
             'respawnMultiplier' => $respawnMultiplier,
+            'atmosphere' => WorldAtmosphere::compute($zoneCode, $now),
             'self' => $payloadBuilder->buildSelf($character, $now),
             'zone' => WorldCatalog::zones()[$zoneCode] ?? WorldCatalog::zones()['lagon_ouest'],
             'players' => array_map(

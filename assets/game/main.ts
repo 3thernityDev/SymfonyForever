@@ -13,6 +13,7 @@ import {
   type MonsterVisual,
   type NpcVisual,
 } from './EntityMeshFactory';
+import { AtmospherePostProcess } from './AtmospherePostProcess';
 import type { EquippedSlotVisual } from './ClassEquipmentBuilder';
 import { Minimap } from './Minimap';
 import { NetworkClient } from './NetworkClient';
@@ -36,10 +37,12 @@ import type {
   SelfState,
   SkillData,
   SyncResponse,
+  WeatherCode,
   WorldBossSummary,
   WorldLootDropState,
 } from './types';
 import { VfxManager } from './VfxManager';
+import { WeatherSystem } from './WeatherSystem';
 
 interface RemotePlayerEntry {
   state: PublicPlayer;
@@ -96,9 +99,19 @@ class SymfonyForeverGame {
   private camera!: THREE.PerspectiveCamera;
   private renderer!: THREE.WebGLRenderer;
   private worldRenderer!: ReunionWorldRenderer;
+  private postProcess!: AtmospherePostProcess;
+  private weatherSystem!: WeatherSystem;
   private controller!: PlayerController;
   private vfx!: VfxManager;
   private minimap!: Minimap;
+
+  private dayCycleSeconds = 720;
+  private timeOfDay = 12.0;
+  private serverWeather: WeatherCode = 'CLEAR';
+  private overrideTimeOfDay: number | null = null;
+  private overrideWeather: WeatherCode | null = null;
+  private lastAtmosphereUiKey = '';
+  private readonly playerPosVec = new THREE.Vector3();
 
   private selfAvatar!: AnimatedAvatar;
   private selfState: SelfState | null = null;
@@ -173,7 +186,14 @@ class SymfonyForeverGame {
 
       setStatus('Construction du relief 3D (Cirques, Piton des Neiges, Fournaise)...');
       this.initThree();
-      this.worldRenderer = new ReunionWorldRenderer(this.scene, this.sampler, this.manifest.landmarks);
+      this.worldRenderer = new ReunionWorldRenderer(
+        this.scene,
+        this.sampler,
+        this.manifest.landmarks,
+        this.manifest.zones,
+        this.manifest.npcs,
+      );
+      this.weatherSystem = new WeatherSystem(this.scene);
       this.vfx = new VfxManager(this.scene, this.floatingLayer);
       this.controller = new PlayerController(
         this.canvas,
@@ -234,11 +254,13 @@ class SymfonyForeverGame {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.18;
+    this.postProcess = new AtmospherePostProcess(this.renderer, this.scene, this.camera);
 
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.postProcess.resize(window.innerWidth, window.innerHeight);
     });
   }
 
@@ -313,8 +335,21 @@ class SymfonyForeverGame {
       this.updateNpcsFrame(elapsed);
       this.updateLootDropsFrame(elapsed);
 
-      // Update environment, VFX, minimap & local cooldown countdowns
-      this.worldRenderer.update(dt, elapsed);
+      // Update environment, weather, post-processing, VFX, minimap & local cooldown countdowns
+      if (this.overrideTimeOfDay === null) {
+        this.timeOfDay = (this.timeOfDay + (dt / Math.max(60, this.dayCycleSeconds)) * 24) % 24;
+      }
+      const activeTime = this.overrideTimeOfDay ?? this.timeOfDay;
+      const activeWeather = this.overrideWeather ?? this.serverWeather;
+      this.playerPosVec.set(this.controller.x, this.controller.y, this.controller.z);
+
+      const weatherFactors = this.weatherSystem.update(dt, elapsed, this.playerPosVec, activeWeather);
+      const atmoFrame = this.worldRenderer.update(dt, elapsed, this.playerPosVec, activeTime, weatherFactors);
+      this.postProcess.update(this.camera, {
+        ...atmoFrame,
+        ...weatherFactors,
+      });
+      this.updateAtmosphereHud(activeTime, activeWeather);
       this.vfx.update(dt);
       this.tickLocalCooldowns(dt);
 
@@ -341,7 +376,7 @@ class SymfonyForeverGame {
         coordsEl.textContent = `${Math.round(this.controller.x)}, ${Math.round(this.controller.z)} (${Math.round(this.controller.y)}m${flyTag})`;
       }
 
-      this.renderer.render(this.scene, this.camera);
+      this.postProcess.render();
     };
     tick();
   }
@@ -401,6 +436,19 @@ class SymfonyForeverGame {
 
     if (resp.correctedPosition) {
       this.controller.teleport(resp.self.x, resp.self.y, resp.self.z);
+    }
+
+    if (resp.atmosphere) {
+      this.dayCycleSeconds = resp.atmosphere.dayCycleSeconds || 720;
+      this.serverWeather = resp.atmosphere.weather;
+      let diff = resp.atmosphere.timeOfDay - this.timeOfDay;
+      if (diff > 12) diff -= 24;
+      if (diff < -12) diff += 24;
+      if (isFirst || Math.abs(diff) > 0.35) {
+        this.timeOfDay = resp.atmosphere.timeOfDay;
+      } else {
+        this.timeOfDay = (this.timeOfDay + diff * 0.25 + 24) % 24;
+      }
     }
 
     // Zone transition atmosphere & banner
@@ -824,6 +872,7 @@ class SymfonyForeverGame {
       chatInput.value = '';
       chatInput.blur();
       if (!text) return;
+      if (this.handleLocalAtmosphereCommand(text)) return;
       const channel = this.activeChatTab === 'COMBAT' ? 'ZONE' : this.activeChatTab;
       const res = await this.net.sendChat(this.characterId, channel, text);
       if (!res.ok) {
@@ -2713,6 +2762,99 @@ class SymfonyForeverGame {
         capEl.className = 'wb-pill ok';
       }
     }
+  }
+
+  private handleLocalAtmosphereCommand(raw: string): boolean {
+    const parts = raw.trim().toLowerCase().split(/\s+/);
+    const cmd = parts[0];
+    const arg = parts[1] ?? '';
+
+    if (cmd === '/time') {
+      if (arg === 'auto' || arg === '') {
+        this.overrideTimeOfDay = null;
+        this.showToast('🕒 Cycle jour/nuit synchronisé sur l\'horloge serveur.');
+        return true;
+      }
+      const presets: Record<string, number> = {
+        aube: 6.4,
+        dawn: 6.4,
+        jour: 12.5,
+        midi: 12.5,
+        day: 12.5,
+        soir: 18.35,
+        crepuscule: 18.35,
+        dusk: 18.35,
+        nuit: 22.5,
+        night: 22.5,
+      };
+      let target = presets[arg];
+      if (target === undefined) {
+        const parsed = Number(arg);
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 24) {
+          this.showToast('Usage : /time <aube|jour|soir|nuit|auto|0-23>');
+          return true;
+        }
+        target = parsed;
+      }
+      this.overrideTimeOfDay = target;
+      const hh = String(Math.floor(target)).padStart(2, '0');
+      const mm = String(Math.floor((target % 1) * 60)).padStart(2, '0');
+      this.showToast(`🕒 Heure forcée à ${hh}:${mm} (/time auto pour réinitialiser).`);
+      return true;
+    }
+
+    if (cmd === '/meteo') {
+      if (arg === 'auto' || arg === '') {
+        this.overrideWeather = null;
+        this.showToast('🌦️ Météo synchronisée sur le biome de la zone.');
+        return true;
+      }
+      const weatherMap: Record<string, { code: WeatherCode; label: string }> = {
+        clair: { code: 'CLEAR', label: 'Ciel clair' },
+        clear: { code: 'CLEAR', label: 'Ciel clair' },
+        pluie: { code: 'RAIN', label: 'Pluie tropicale' },
+        rain: { code: 'RAIN', label: 'Pluie tropicale' },
+        orage: { code: 'STORM', label: 'Orage tropical' },
+        storm: { code: 'STORM', label: 'Orage tropical' },
+        sable: { code: 'SANDSTORM', label: 'Tempête de sable' },
+        sand: { code: 'SANDSTORM', label: 'Tempête de sable' },
+        sandstorm: { code: 'SANDSTORM', label: 'Tempête de sable' },
+      };
+      const picked = weatherMap[arg];
+      if (!picked) {
+        this.showToast('Usage : /meteo <clair|pluie|orage|sable|auto>');
+        return true;
+      }
+      this.overrideWeather = picked.code;
+      this.showToast(`🌦️ Météo : ${picked.label} (/meteo auto pour réinitialiser).`);
+      return true;
+    }
+
+    return false;
+  }
+
+  private updateAtmosphereHud(timeOfDay: number, weather: WeatherCode): void {
+    const totalMins = Math.floor(timeOfDay * 60);
+    const hh = String(Math.floor(totalMins / 60) % 24).padStart(2, '0');
+    const mm = String(totalMins % 60).padStart(2, '0');
+    const isNight = timeOfDay < 6.0 || timeOfDay >= 19.25;
+    const isGolden = (timeOfDay >= 5.5 && timeOfDay < 7.5) || (timeOfDay >= 17.0 && timeOfDay < 19.5);
+
+    const timeIcon = isNight ? '🌙' : isGolden ? '🌅' : '☀️';
+    const weatherMeta: Record<WeatherCode, { icon: string; label: string }> = {
+      CLEAR: { icon: '', label: 'Ciel clair' },
+      RAIN: { icon: '🌧️ ', label: 'Pluie tropicale' },
+      STORM: { icon: '⛈️ ', label: 'Orage tropical' },
+      SANDSTORM: { icon: '🌪️ ', label: 'Tempête de sable' },
+    };
+    const wInfo = weatherMeta[weather];
+    const key = `${hh}:${mm}|${timeIcon}|${weather}`;
+    if (key === this.lastAtmosphereUiKey) return;
+    this.lastAtmosphereUiKey = key;
+
+    const el = document.getElementById('hud-atmosphere');
+    if (!el) return;
+    el.innerHTML = `<span>${timeIcon} ${hh}:${mm}</span><span>${wInfo.icon}${wInfo.label}</span>`;
   }
 
   private showToast(msg: string): void {

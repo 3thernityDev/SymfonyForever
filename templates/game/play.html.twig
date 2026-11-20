@@ -157,6 +157,12 @@
     #minimap-canvas { width: 202px; height: 202px; border-radius: 10px; border: 1px solid rgba(94, 234, 212, 0.35); display: block; }
     .net-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); }
     .net-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; margin-right: 4px; }
+    .atmo-row {
+        display: flex; align-items: center; justify-content: space-between; gap: 6px;
+        padding: 4px 8px; border-radius: 7px; font-size: 11px; font-weight: 600;
+        background: rgba(15, 29, 44, 0.78); border: 1px solid rgba(94, 234, 212, 0.28);
+        color: #e2e8f0;
+    }
     .travel-row { display: flex; gap: 4px; }
     .travel-row select {
         flex: 1; min-width: 0; background: rgba(5,13,21,0.85); color: #e2e8f0;
@@ -451,6 +457,10 @@
             <div id="wb-minimap-pill" title="Cliquer pour préparer le voyage vers le Piton de la Fournaise (World Boss 10 joueurs · 1× Légendaire garanti)">
                 <span>🌋 Dolomieu</span>
                 <strong id="wb-minimap-status">Actif</strong>
+            </div>
+            <div class="atmo-row" id="hud-atmosphere" title="Cycle jour/nuit &amp; météo de la zone (/time, /meteo)">
+                <span>☀️ 12:00</span>
+                <span>Ciel clair</span>
             </div>
             <div class="travel-row">
                 <select id="travel-select" title="Relais des Cirques (Voyage rapide hors combat)"></select>

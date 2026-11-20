@@ -1,5 +1,16 @@
 export type ClassCode = 'TANK' | 'DPS' | 'HEAL';
 
+export type WeatherCode = 'CLEAR' | 'RAIN' | 'STORM' | 'SANDSTORM';
+
+export interface AtmosphereState {
+  timeOfDay: number;
+  phase: 'DAWN' | 'DAY' | 'DUSK' | 'NIGHT';
+  isNight: boolean;
+  weather: WeatherCode;
+  weatherLabel: string;
+  dayCycleSeconds: number;
+}
+
 export interface ClassMeta {
   code: ClassCode;
   label: string;
@@ -395,6 +406,7 @@ export interface SyncResponse {
   onlineCount?: number;
   zonePlayerCount?: number;
   respawnMultiplier?: number;
+  atmosphere?: AtmosphereState;
   self: SelfState;
   zone: ZoneMeta;
   players: PublicPlayer[];

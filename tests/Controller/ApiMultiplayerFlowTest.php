@@ -78,6 +78,11 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertSame('lagon_ouest', $sync['zone']['code']);
         self::assertGreaterThanOrEqual(1, $sync['zonePlayerCount']);
         self::assertGreaterThanOrEqual(1.0, $sync['respawnMultiplier']);
+        self::assertIsArray($sync['atmosphere']);
+        self::assertArrayHasKey('timeOfDay', $sync['atmosphere']);
+        self::assertArrayHasKey('weather', $sync['atmosphere']);
+        self::assertArrayHasKey('isNight', $sync['atmosphere']);
+        self::assertSame(720.0, (float) $sync['atmosphere']['dayCycleSeconds']);
         self::assertNotEmpty($sync['monsters']);
 
         // Pick closest monster & move next to it using the current kernel's EntityManager
