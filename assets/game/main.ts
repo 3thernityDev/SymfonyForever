@@ -261,7 +261,7 @@ class SymfonyForeverGame {
 
   private initThree(): void {
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 3200);
+    this.camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.5, 6500);
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -270,10 +270,12 @@ class SymfonyForeverGame {
     this.postProcess = new AtmospherePostProcess(this.renderer, this.scene, this.camera);
 
     window.addEventListener('resize', () => {
+      const pr = Math.min(window.devicePixelRatio, 2);
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.postProcess.resize(window.innerWidth, window.innerHeight);
+      this.worldRenderer?.resize(window.innerHeight, pr);
     });
   }
 

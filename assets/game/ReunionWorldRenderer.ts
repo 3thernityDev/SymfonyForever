@@ -31,6 +31,16 @@ interface TorchSite {
   phase: number;
 }
 
+interface DistantLightSite {
+  x: number;
+  y: number;
+  z: number;
+  color: number;
+  poolSize: number;
+  minPx: number;
+  phase: number;
+}
+
 /**
  * Renders the living 3D Island of La Réunion:
  * - Displaced terrain mesh colored by biomes, cliffs, trails & Dolomieu magma
@@ -71,6 +81,8 @@ export class ReunionWorldRenderer {
   private readonly torchSites: TorchSite[] = [];
   private readonly torchLightPool: THREE.PointLight[] = [];
   private readonly campfireFlames: { mesh: THREE.Mesh; baseY: number; phase: number }[] = [];
+  private readonly distantLightSites: DistantLightSite[] = [];
+  private distantLightsMat: THREE.ShaderMaterial | null = null;
 
   private readonly zoneSkyBase = new THREE.Color('#4da6e8');
   private readonly zoneFogBase = new THREE.Color('#a5dff9');
@@ -243,12 +255,14 @@ export class ReunionWorldRenderer {
       emissive: 0xff6b1a,
       emissiveIntensity: 1.2,
       roughness: 0.3,
+      fog: false,
     });
     this.fumaroleMat = new THREE.MeshStandardMaterial({
       color: 0x3b1810,
       emissive: 0xff4500,
       emissiveIntensity: 1.4,
       roughness: 0.7,
+      fog: false,
     });
     this.waterfallMat = new THREE.MeshStandardMaterial({
       color: 0xe0f7fa,
@@ -356,6 +370,7 @@ export class ReunionWorldRenderer {
     this.buildAllZoneVillagesAndLandmarks(sampler, landmarks, zones, npcs, hubX, hubZ);
     this.placeRoadsideTrailTorches(sampler, trails, zones, npcs, bossX, bossZ);
     this.renderTorchInstances();
+    this.buildDistantNightLights();
 
     // Pool of 10 dynamic PointLights bound dynamically to nearest torches/campfires around player
     for (let i = 0; i < 10; i++) {
@@ -373,6 +388,13 @@ export class ReunionWorldRenderer {
     this.zoneSkyBase.set(zone.skyColor);
     this.zoneFogBase.set(zone.fogColor);
     this.zoneAmbientBase.set(zone.ambientColor);
+  }
+
+  public resize(viewportHeight: number, pixelRatio: number): void {
+    if (!this.distantLightsMat) return;
+    const pr = Math.max(1, pixelRatio);
+    this.distantLightsMat.uniforms['uFocalScale'].value = this.computeFocalScale(viewportHeight, pr);
+    this.distantLightsMat.uniforms['uPixelRatio'].value = pr;
   }
 
   public update(
@@ -578,6 +600,15 @@ export class ReunionWorldRenderer {
     }
 
     this.updateTorchLightPool(playerPos, elapsed, nightFactor, goldenFactor);
+
+    if (this.distantLightsMat) {
+      this.distantLightsMat.uniforms['uTime'].value = elapsed;
+      this.distantLightsMat.uniforms['uNightGlow'].value = THREE.MathUtils.clamp(nightFactor + goldenFactor * 0.32, 0, 1);
+      this.distantLightsMat.uniforms['uWeatherAtten'].value = Math.max(
+        0.42,
+        1.0 - weather.stormFactor * 0.28 - weather.sandstormFactor * 0.45,
+      );
+    }
 
     this.playerLanternLight.position.set(playerPos.x, playerPos.y + 2.4, playerPos.z);
     this.playerLanternLight.intensity = nightFactor * 0.48 + goldenFactor * 0.15;
@@ -875,7 +906,27 @@ export class ReunionWorldRenderer {
       const vent = new THREE.Mesh(new THREE.ConeGeometry(1.8, 1.4, 6), this.fumaroleMat);
       vent.position.set(fx, fy + 0.5, fz);
       this.scene.add(vent);
+
+      this.distantLightSites.push({
+        x: fx,
+        y: fy + 1.4,
+        z: fz,
+        color: 0xff4818,
+        poolSize: 28,
+        minPx: 5.5,
+        phase: i * 1.1,
+      });
     }
+
+    this.distantLightSites.push({
+      x: bossX,
+      y: this.volcanoBaseY + 4.0,
+      z: bossZ,
+      color: 0xff4510,
+      poolSize: 52,
+      minPx: 7.0,
+      phase: 0.5,
+    });
   }
 
   private buildAllZoneVillagesAndLandmarks(
@@ -955,10 +1006,20 @@ export class ReunionWorldRenderer {
 
       const orb = new THREE.Mesh(
         new THREE.OctahedronGeometry(0.95),
-        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.2 }),
+        new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.9, roughness: 0.2, fog: false }),
       );
       orb.position.set(bx, y + 6.4, bz);
       this.scene.add(orb);
+
+      this.distantLightSites.push({
+        x: bx,
+        y: y + 6.4,
+        z: bz,
+        color,
+        poolSize: 16,
+        minPx: 4.5,
+        phase: (bx - bz) * 0.01,
+      });
 
       if (lm.type === 'hub' || lm.type === 'boss') {
         const beam = new THREE.Mesh(
@@ -1006,6 +1067,16 @@ export class ReunionWorldRenderer {
 
     hut.add(base, roof, frontWinL, frontWinR, door);
     this.scene.add(hut);
+
+    this.distantLightSites.push({
+      x: x + Math.sin(rotY) * 2.9,
+      y: y + 2.3,
+      z: z + Math.cos(rotY) * 2.9,
+      color: 0xffc864,
+      poolSize: 14,
+      minPx: 4.0,
+      phase: (x + z) * 0.01,
+    });
   }
 
   private addCampfire(x: number, y: number, z: number, phase: number): void {
@@ -1169,6 +1240,151 @@ export class ReunionWorldRenderer {
     this.scene.add(postMesh, brazierMesh, flameMesh);
   }
 
+  private computeFocalScale(viewportHeight: number, pixelRatio: number): number {
+    return ((Math.max(1, viewportHeight) * 0.5) / Math.tan(THREE.MathUtils.degToRad(58 * 0.5))) * pixelRatio;
+  }
+
+  private buildDistantNightLights(): void {
+    for (const t of this.torchSites) {
+      if (t.isCampfire) {
+        this.distantLightSites.push({
+          x: t.x,
+          y: t.y + 1.65,
+          z: t.z,
+          color: 0xff7b24,
+          poolSize: 32,
+          minPx: 6.5,
+          phase: t.phase,
+        });
+      } else {
+        this.distantLightSites.push({
+          x: t.x,
+          y: t.y + 3.65,
+          z: t.z,
+          color: 0xff9a3c,
+          poolSize: 18,
+          minPx: 4.5,
+          phase: t.phase,
+        });
+      }
+    }
+
+    const count = this.distantLightSites.length;
+    if (count === 0) return;
+
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const poolSizes = new Float32Array(count);
+    const minPxArr = new Float32Array(count);
+    const phases = new Float32Array(count);
+    const tmpCol = new THREE.Color();
+
+    for (let i = 0; i < count; i++) {
+      const site = this.distantLightSites[i];
+      positions[i * 3] = site.x;
+      positions[i * 3 + 1] = site.y;
+      positions[i * 3 + 2] = site.z;
+
+      tmpCol.setHex(site.color);
+      colors[i * 3] = tmpCol.r;
+      colors[i * 3 + 1] = tmpCol.g;
+      colors[i * 3 + 2] = tmpCol.b;
+
+      poolSizes[i] = site.poolSize;
+      minPxArr[i] = site.minPx;
+      phases[i] = site.phase;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aPoolSize', new THREE.BufferAttribute(poolSizes, 1));
+    geo.setAttribute('aMinPx', new THREE.BufferAttribute(minPxArr, 1));
+    geo.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
+
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const focalScale = this.computeFocalScale(window.innerHeight, pixelRatio);
+
+    this.distantLightsMat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      fog: false,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uTime: { value: 0.0 },
+        uNightGlow: { value: 0.0 },
+        uWeatherAtten: { value: 1.0 },
+        uFocalScale: { value: focalScale },
+        uPixelRatio: { value: pixelRatio },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec3 aColor;
+        attribute float aPoolSize;
+        attribute float aMinPx;
+        attribute float aPhase;
+
+        uniform float uFocalScale;
+        uniform float uPixelRatio;
+
+        varying vec3 vColor;
+        varying float vDist;
+        varying float vPointSizePx;
+        varying float vPhase;
+
+        void main() {
+          vColor = aColor;
+          vPhase = aPhase;
+
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          float dist = max(1.0, -mvPosition.z);
+          vDist = dist;
+
+          float projPx = (aPoolSize * uFocalScale) / dist;
+          float ptSize = clamp(projPx, aMinPx * uPixelRatio, 115.0 * uPixelRatio);
+          vPointSizePx = ptSize;
+
+          gl_PointSize = ptSize;
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform float uNightGlow;
+        uniform float uWeatherAtten;
+        uniform float uPixelRatio;
+
+        varying vec3 vColor;
+        varying float vDist;
+        varying float vPointSizePx;
+        varying float vPhase;
+
+        void main() {
+          vec2 p = gl_PointCoord - 0.5;
+          float r = length(p) * 2.0;
+          if (r > 1.0) discard;
+
+          float flick = 0.88 + 0.08 * sin(uTime * 8.5 + vPhase) + 0.04 * cos(uTime * 15.2 + vPhase * 1.7);
+          float poolFadeIn = smoothstep(26.0, 68.0, vDist);
+          float poolGlow = pow(max(0.0, 1.0 - r), 2.8) * 0.40 * poolFadeIn;
+
+          float coreRadiusUv = clamp((2.6 * uPixelRatio) / max(vPointSizePx, 1.0), 0.04, 0.58);
+          float cr = r / coreRadiusUv;
+          float coreGlow = exp(-cr * cr * 2.2) * (0.72 + 0.42 * smoothstep(20.0, 95.0, vDist));
+          float distFade = mix(0.62, 1.0, exp(-vDist * 0.00055));
+
+          vec3 coreTint = mix(vColor, vec3(1.0, 0.94, 0.82), 0.55);
+          vec3 finalCol = (vColor * poolGlow + coreTint * coreGlow) * uNightGlow * uWeatherAtten * flick * distFade;
+          gl_FragColor = vec4(finalCol, 1.0);
+        }
+      `,
+    });
+
+    const pts = new THREE.Points(geo, this.distantLightsMat);
+    pts.frustumCulled = false;
+    this.scene.add(pts);
+  }
+
   private createVolcanoEmbers(bossX: number, bossZ: number): THREE.Points {
     const count = 90;
     const positions = new Float32Array(count * 3);
@@ -1184,7 +1400,7 @@ export class ReunionWorldRenderer {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     return new THREE.Points(
       geo,
-      new THREE.PointsMaterial({ color: 0xff6b2b, size: 2.2, transparent: true, opacity: 0.85 }),
+      new THREE.PointsMaterial({ color: 0xff6b2b, size: 2.2, transparent: true, opacity: 0.85, fog: false }),
     );
   }
 }
