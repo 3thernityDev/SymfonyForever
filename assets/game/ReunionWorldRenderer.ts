@@ -43,7 +43,6 @@ export class ReunionWorldRenderer {
   public readonly waterMesh: THREE.Mesh;
 
   private readonly scene: THREE.Scene;
-  private readonly sampler: TerrainSampler;
   private readonly sunLight: THREE.DirectionalLight;
   private readonly fillLight: THREE.DirectionalLight;
   private readonly hemiLight: THREE.HemisphereLight;
@@ -73,12 +72,6 @@ export class ReunionWorldRenderer {
   private readonly torchLightPool: THREE.PointLight[] = [];
   private readonly campfireFlames: { mesh: THREE.Mesh; baseY: number; phase: number }[] = [];
 
-  private readonly fireflyCount = 180;
-  private readonly fireflyOffsets: Float32Array;
-  private readonly fireflyPositions: Float32Array;
-  private readonly fireflyMat: THREE.PointsMaterial;
-  private readonly fireflies: THREE.Points;
-
   private readonly zoneSkyBase = new THREE.Color('#4da6e8');
   private readonly zoneFogBase = new THREE.Color('#a5dff9');
   private readonly zoneAmbientBase = new THREE.Color('#ffe8c2');
@@ -97,9 +90,9 @@ export class ReunionWorldRenderer {
   private readonly cWater = new THREE.Color();
   private readonly cDawnSky = new THREE.Color('#e08a6d');
   private readonly cDuskSky = new THREE.Color('#c9583e');
-  private readonly cNightSky = new THREE.Color('#071024');
+  private readonly cNightSky = new THREE.Color('#010206');
   private readonly cDawnFog = new THREE.Color('#f0a87e');
-  private readonly cNightFog = new THREE.Color('#0b162d');
+  private readonly cNightFog = new THREE.Color('#010205');
   private readonly cRainSky = new THREE.Color('#475c70');
   private readonly cStormSky = new THREE.Color('#1d2738');
   private readonly cSandSky = new THREE.Color('#9c6638');
@@ -107,7 +100,9 @@ export class ReunionWorldRenderer {
   private readonly cNoonSun = new THREE.Color('#fff5e0');
   private readonly cGoldenSun = new THREE.Color('#ff8e42');
   private readonly cMoonLight = new THREE.Color('#8bb4f7');
-  private readonly cNightAmbient = new THREE.Color('#1a2a4d');
+  private readonly cNightAmbient = new THREE.Color('#060b18');
+  private readonly cDayGround = new THREE.Color('#5c6e52');
+  private readonly cNightGround = new THREE.Color('#04060b');
 
   public constructor(
     scene: THREE.Scene,
@@ -117,7 +112,6 @@ export class ReunionWorldRenderer {
     npcs?: NpcData[],
   ) {
     this.scene = scene;
-    this.sampler = sampler;
 
     const hubLandmark = landmarks.find((l) => l.type === 'hub');
     const bossLandmark = landmarks.find((l) => l.type === 'boss');
@@ -129,9 +123,9 @@ export class ReunionWorldRenderer {
 
     const softTex = createSoftParticleTexture();
 
-    // Sky & atmospheric fog tuned for 7168 x 7168 Réunion vista
+    // Sky & linear distance fog (strict <= 50m visibility at night without light sources)
     scene.background = this.zoneSkyBase.clone();
-    scene.fog = new THREE.FogExp2(this.zoneFogBase.getHex(), 0.00075);
+    scene.fog = new THREE.Fog(this.zoneFogBase.getHex(), 240, 2050);
 
     // Core lights modulated smoothly over Day/Night & Weather
     this.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
@@ -148,7 +142,7 @@ export class ReunionWorldRenderer {
     this.fillLight.position.set(1200, 900, -1100);
     scene.add(this.fillLight);
 
-    this.playerLanternLight = new THREE.PointLight(0xffd699, 0, 22, 1.6);
+    this.playerLanternLight = new THREE.PointLight(0xffd699, 0, 15, 1.8);
     scene.add(this.playerLanternLight);
 
     // 1. Celestial bodies (Orbiting Sun + Halo, Moon, Starfield, Drifting Clouds)
@@ -369,31 +363,7 @@ export class ReunionWorldRenderer {
       this.torchLightPool.push(pl);
     }
 
-    // 5. Nocturnal golden fireflies around the player
-    this.fireflyOffsets = new Float32Array(this.fireflyCount * 3);
-    this.fireflyPositions = new Float32Array(this.fireflyCount * 3);
-    for (let i = 0; i < this.fireflyCount; i++) {
-      this.fireflyOffsets[i * 3] = (starRand() - 0.5) * 78;
-      this.fireflyOffsets[i * 3 + 1] = 1.0 + starRand() * 11;
-      this.fireflyOffsets[i * 3 + 2] = (starRand() - 0.5) * 78;
-    }
-    const ffGeo = new THREE.BufferGeometry();
-    ffGeo.setAttribute('position', new THREE.BufferAttribute(this.fireflyPositions, 3));
-    this.fireflyMat = new THREE.PointsMaterial({
-      color: 0xfde047,
-      map: softTex,
-      size: 1.5,
-      transparent: true,
-      opacity: 0,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    this.fireflies = new THREE.Points(ffGeo, this.fireflyMat);
-    this.fireflies.frustumCulled = false;
-    this.fireflies.visible = false;
-    scene.add(this.fireflies);
-
-    // 6. Rising glowing embers over Piton de la Fournaise
+    // 5. Rising glowing embers over Piton de la Fournaise
     this.volcanoParticles = this.createVolcanoEmbers(bossX, bossZ);
     scene.add(this.volcanoParticles);
   }
@@ -410,6 +380,7 @@ export class ReunionWorldRenderer {
     playerPos: THREE.Vector3,
     timeOfDay: number,
     weather: WeatherFrameFactors,
+    cameraDistToPlayer = 18,
   ): AtmosphereFrameResult {
     // 1. Tide animation
     this.waterMesh.position.y = 6.0 + Math.sin(elapsed * 1.3) * 0.22;
@@ -466,7 +437,7 @@ export class ReunionWorldRenderer {
       this.cSky.lerp(goldenSky, goldenFactor * 0.72);
     }
     if (nightFactor > 0.01) {
-      this.cSky.lerp(this.cNightSky, nightFactor * 0.94);
+      this.cSky.lerp(this.cNightSky, nightFactor * 0.995);
     }
 
     this.cFog.copy(this.zoneFogBase);
@@ -474,22 +445,26 @@ export class ReunionWorldRenderer {
       this.cFog.lerp(this.cDawnFog, goldenFactor * 0.6);
     }
     if (nightFactor > 0.01) {
-      this.cFog.lerp(this.cNightFog, nightFactor * 0.92);
+      this.cFog.lerp(this.cNightFog, nightFactor * 0.995);
     }
 
-    // Weather tints sky & fog
+    // Weather tints sky & fog (kept deep dark at night so night fog stays black, never washed-out brown)
+    const nightDarkScale = 1 - nightFactor * 0.92;
     if (weather.rainFactor > 0.01) {
-      this.cSky.lerp(this.cRainSky, weather.rainFactor * (0.55 - nightFactor * 0.25));
-      this.cFog.lerp(this.cRainSky, weather.rainFactor * (0.5 - nightFactor * 0.2));
+      const targetRain = this.cRainSky.clone().multiplyScalar(nightDarkScale);
+      this.cSky.lerp(targetRain, weather.rainFactor * 0.55);
+      this.cFog.lerp(targetRain, weather.rainFactor * 0.5);
     }
     if (weather.stormFactor > 0.01) {
-      this.cSky.lerp(this.cStormSky, weather.stormFactor * 0.78);
-      this.cFog.lerp(this.cStormSky, weather.stormFactor * 0.72);
+      const targetStorm = this.cStormSky.clone().multiplyScalar(nightDarkScale);
+      this.cSky.lerp(targetStorm, weather.stormFactor * 0.78);
+      this.cFog.lerp(targetStorm, weather.stormFactor * 0.72);
     }
     if (weather.sandstormFactor > 0.01) {
-      const sandNight = this.cSandSky.clone().lerp(this.cNightFog, nightFactor * 0.65);
-      this.cSky.lerp(sandNight, weather.sandstormFactor * 0.86);
-      this.cFog.lerp(this.cSandFog.clone().lerp(this.cNightFog, nightFactor * 0.65), weather.sandstormFactor * 0.88);
+      const sandSky = this.cSandSky.clone().lerp(this.cNightSky, nightFactor * 0.92);
+      const sandFog = this.cSandFog.clone().lerp(this.cNightFog, nightFactor * 0.92);
+      this.cSky.lerp(sandSky, weather.sandstormFactor * 0.86);
+      this.cFog.lerp(sandFog, weather.sandstormFactor * 0.88);
     }
 
     // Brief lightning illumination on sky & fog during storm flashes
@@ -501,35 +476,52 @@ export class ReunionWorldRenderer {
 
     const bg = this.scene.background as THREE.Color;
     bg.lerp(this.cSky, Math.min(1, dt * 4.5));
-    const fog = this.scene.fog as THREE.FogExp2;
+    const fog = this.scene.fog as THREE.Fog;
     fog.color.lerp(this.cFog, Math.min(1, dt * 4.5));
 
-    const targetFogDensity =
-      0.00068 +
-      goldenFactor * 0.00018 +
-      nightFactor * 0.00045 +
-      weather.rainFactor * 0.0008 +
-      weather.stormFactor * 0.00095 +
-      weather.sandstormFactor * 0.0028;
-    fog.density += (targetFogDensity - fog.density) * Math.min(1, dt * 2.5);
+    // Linear visibility distance: crisp 50m max cutoff from player at night without light sources
+    let dayNear = 240;
+    let dayFar = 2050;
+    dayNear = THREE.MathUtils.lerp(dayNear, 70, weather.rainFactor);
+    dayFar = THREE.MathUtils.lerp(dayFar, 780, weather.rainFactor);
+    dayNear = THREE.MathUtils.lerp(dayNear, 40, weather.stormFactor);
+    dayFar = THREE.MathUtils.lerp(dayFar, 460, weather.stormFactor);
+    dayNear = THREE.MathUtils.lerp(dayNear, 22, weather.sandstormFactor);
+    dayFar = THREE.MathUtils.lerp(dayFar, 175, weather.sandstormFactor);
+
+    const camDist = Math.max(6, cameraDistToPlayer);
+    const nightNear = camDist + 4;
+    const nightFar = Math.max(
+      camDist + 16,
+      camDist + 48 - weather.stormFactor * 6 - weather.sandstormFactor * 12 + weather.lightningFlash * 85,
+    );
+
+    const targetNear = THREE.MathUtils.lerp(dayNear, nightNear, Math.pow(nightFactor, 0.7));
+    const targetFar = Math.exp(
+      THREE.MathUtils.lerp(Math.log(Math.max(30, dayFar)), Math.log(Math.max(20, nightFar)), nightFactor),
+    );
+    const fogBlend = Math.min(1, dt * 4.0);
+    fog.near += (targetNear - fog.near) * fogBlend;
+    fog.far += (targetFar - fog.far) * fogBlend;
 
     // Water & cloud coloring
-    this.cWater.setHex(0x0ea5b7).lerp(new THREE.Color(0x072642), nightFactor * 0.85).lerp(new THREE.Color(0x274050), weather.stormFactor * 0.55);
+    this.cWater.setHex(0x0ea5b7).lerp(new THREE.Color(0x030c18), nightFactor * 0.95).lerp(new THREE.Color(0x1b2b36), weather.stormFactor * 0.55);
     (this.waterMesh.material as THREE.MeshStandardMaterial).color.copy(this.cWater);
 
     this.cloudMat.color
       .setHex(0xffffff)
       .lerp(this.cDawnFog, goldenFactor * 0.75)
-      .lerp(new THREE.Color(0x1f2d47), nightFactor * 0.82)
-      .lerp(new THREE.Color(0x475569), weather.stormFactor * 0.7)
-      .lerp(new THREE.Color(0xc48b56), weather.sandstormFactor * 0.6);
+      .lerp(new THREE.Color(0x050914), nightFactor * 0.94)
+      .lerp(new THREE.Color(0x334155), weather.stormFactor * 0.7)
+      .lerp(new THREE.Color(0xc48b56), weather.sandstormFactor * (0.6 - nightFactor * 0.5));
 
-    // 4. Directional / Hemisphere / Ambient intensities
-    this.cAmbient.copy(this.zoneAmbientBase).lerp(this.cNightAmbient, nightFactor * 0.88);
+    // 4. Directional / Hemisphere / Ambient intensities (pitch-dark unlit night)
+    this.cAmbient.copy(this.zoneAmbientBase).lerp(this.cNightAmbient, nightFactor * 0.95);
     this.hemiLight.color.lerp(this.cAmbient, Math.min(1, dt * 4.0));
-    this.hemiLight.intensity = Math.max(0.32, 1.05 * (1 - nightFactor * 0.65) * (1 - weather.stormFactor * 0.35));
-    this.ambientLight.intensity = Math.max(0.28, 0.72 * (1 - nightFactor * 0.56) * (1 - weather.stormFactor * 0.25));
-    this.fillLight.intensity = 0.62 * (1 - nightFactor * 0.65);
+    this.hemiLight.groundColor.copy(this.cDayGround).lerp(this.cNightGround, nightFactor);
+    this.hemiLight.intensity = Math.max(0.06, 1.05 * (1 - nightFactor * 0.94) * (1 - weather.stormFactor * 0.35));
+    this.ambientLight.intensity = Math.max(0.04, 0.72 * (1 - nightFactor * 0.94) * (1 - weather.stormFactor * 0.25));
+    this.fillLight.intensity = Math.max(0.015, 0.62 * (1 - nightFactor * 0.97));
 
     if (sunAbove) {
       this.sunLight.position.copy(this.sunDir).multiplyScalar(1400);
@@ -542,7 +534,7 @@ export class ReunionWorldRenderer {
       const moonDir = this.sunDir.clone().negate();
       this.sunLight.position.copy(moonDir).multiplyScalar(1400);
       this.sunLight.color.copy(this.cMoonLight);
-      this.sunLight.intensity = 0.48 * Math.max(0.25, 1 - weather.stormFactor * 0.7);
+      this.sunLight.intensity = 0.12 * Math.max(0.2, 1 - weather.stormFactor * 0.75);
       this.activeLightWorldPos.copy(this.moonWorldPos);
       this.activeSunColor.copy(this.cMoonLight);
     }
@@ -568,9 +560,9 @@ export class ReunionWorldRenderer {
     }
 
     // 6. Glowing night hut windows, torches, campfires, waterfalls, fumaroles & lantern
-    this.windowMat.emissiveIntensity = nightFactor * 2.4 + goldenFactor * 0.65;
+    this.windowMat.emissiveIntensity = nightFactor * 3.2 + goldenFactor * 0.7;
     const flickerBase = 0.88 + Math.sin(elapsed * 9.5) * 0.1 + Math.sin(elapsed * 16.3) * 0.06;
-    this.torchFlameMat.emissiveIntensity = (0.35 + nightFactor * 2.35 + goldenFactor * 0.9) * flickerBase;
+    this.torchFlameMat.emissiveIntensity = (0.35 + nightFactor * 3.4 + goldenFactor * 1.0) * flickerBase;
     this.fumaroleMat.emissiveIntensity = (1.1 + nightFactor * 1.4) * (0.85 + Math.sin(elapsed * 3.7) * 0.22);
 
     this.waterfallMat.opacity = 0.62 + Math.sin(elapsed * 3.8) * 0.1 + weather.rainFactor * 0.18;
@@ -586,30 +578,10 @@ export class ReunionWorldRenderer {
 
     this.updateTorchLightPool(playerPos, elapsed, nightFactor, goldenFactor);
 
-    this.playerLanternLight.position.set(playerPos.x, playerPos.y + 2.8, playerPos.z);
-    this.playerLanternLight.intensity = nightFactor * 1.45 + goldenFactor * 0.35;
+    this.playerLanternLight.position.set(playerPos.x, playerPos.y + 2.4, playerPos.z);
+    this.playerLanternLight.intensity = nightFactor * 0.48 + goldenFactor * 0.15;
 
-    // 7. Nocturnal fireflies
-    const ffVis = nightFactor > 0.22 && weather.stormFactor < 0.5 && weather.sandstormFactor < 0.5;
-    if (ffVis) {
-      this.fireflies.visible = true;
-      this.fireflyMat.opacity = THREE.MathUtils.clamp((nightFactor - 0.2) * 1.25, 0, 0.88);
-      for (let i = 0; i < this.fireflyCount; i++) {
-        const idx3 = i * 3;
-        const ox = this.fireflyOffsets[idx3] + Math.sin(elapsed * 0.9 + i * 0.7) * 2.2;
-        const oz = this.fireflyOffsets[idx3 + 2] + Math.cos(elapsed * 0.8 + i * 0.5) * 2.2;
-        const groundY = this.sampler.getHeight(playerPos.x + ox, playerPos.z + oz);
-        const oy = Math.max(groundY + 0.9, playerPos.y + 0.6) + Math.sin(elapsed * 1.8 + i) * 0.9;
-        this.fireflyPositions[idx3] = playerPos.x + ox;
-        this.fireflyPositions[idx3 + 1] = oy;
-        this.fireflyPositions[idx3 + 2] = playerPos.z + oz;
-      }
-      (this.fireflies.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    } else {
-      this.fireflies.visible = false;
-    }
-
-    // 8. Volcano embers
+    // 7. Volcano embers
     const pAttr = this.volcanoParticles.geometry.attributes.position as THREE.BufferAttribute;
     const minY = this.volcanoBaseY + 4;
     const maxY = this.volcanoBaseY + 115;
@@ -644,7 +616,7 @@ export class ReunionWorldRenderer {
     }
     scored.sort((a, b) => a.d2 - b.d2);
 
-    const baseStrength = 0.28 + goldenFactor * 1.45 + nightFactor * 4.1;
+    const baseStrength = 0.28 + goldenFactor * 1.6 + nightFactor * 6.2;
     for (let i = 0; i < this.torchLightPool.length; i++) {
       const pl = this.torchLightPool[i];
       if (i < scored.length) {

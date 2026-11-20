@@ -343,8 +343,9 @@ class SymfonyForeverGame {
       const activeWeather = this.overrideWeather ?? this.serverWeather;
       this.playerPosVec.set(this.controller.x, this.controller.y, this.controller.z);
 
+      const camDist = this.camera.position.distanceTo(this.playerPosVec);
       const weatherFactors = this.weatherSystem.update(dt, elapsed, this.playerPosVec, activeWeather);
-      const atmoFrame = this.worldRenderer.update(dt, elapsed, this.playerPosVec, activeTime, weatherFactors);
+      const atmoFrame = this.worldRenderer.update(dt, elapsed, this.playerPosVec, activeTime, weatherFactors, camDist);
       this.postProcess.update(this.camera, {
         ...atmoFrame,
         ...weatherFactors,

@@ -107,7 +107,7 @@ export class AtmospherePostProcess {
   private readonly tmpSunDir = new THREE.Vector3();
   private readonly tmpTint = new THREE.Color();
   private readonly warmGoldenTint = new THREE.Color('#ffbe78');
-  private readonly coolNightTint = new THREE.Color('#6488d9');
+  private readonly coolNightTint = new THREE.Color('#2b3f6b');
   private readonly stormTint = new THREE.Color('#7da2b8');
   private readonly sandTint = new THREE.Color('#e3a25f');
 
@@ -163,7 +163,7 @@ export class AtmospherePostProcess {
     const onScreenWeight = THREE.MathUtils.smoothstep(1.35 - edgeDist, 0.0, 0.85);
 
     const occlusion = Math.max(0.12, 1.0 - stormFactor * 0.85 - rainFactor * 0.45 - sandstormFactor * 0.72);
-    const baseRayPower = goldenFactor * 1.45 + dayFactor * 0.52 + nightFactor * 0.24;
+    const baseRayPower = goldenFactor * 1.45 + dayFactor * 0.52 + nightFactor * 0.08;
     const rayIntensity = baseRayPower * facingSmooth * onScreenWeight * occlusion;
 
     this.gradePass.uniforms['uGodRayIntensity'].value = rayIntensity;
@@ -173,23 +173,23 @@ export class AtmospherePostProcess {
     const desiredStrength =
       0.36 * dayFactor +
       0.56 * goldenFactor +
-      0.62 * nightFactor +
+      0.66 * nightFactor +
       0.14 * stormFactor;
     const desiredThreshold =
       0.86 * (1.0 - nightFactor * 0.55) + 0.74 * (nightFactor * 0.55) - goldenFactor * 0.05;
-    this.bloomPass.strength = THREE.MathUtils.clamp(desiredStrength, 0.34, 0.72);
+    this.bloomPass.strength = THREE.MathUtils.clamp(desiredStrength, 0.34, 0.74);
     this.bloomPass.threshold = THREE.MathUtils.clamp(desiredThreshold, 0.70, 0.88);
-    this.bloomPass.radius = 0.55 + goldenFactor * 0.14 + nightFactor * 0.12;
+    this.bloomPass.radius = 0.55 + goldenFactor * 0.14 + nightFactor * 0.14;
 
-    // Tone mapping exposure (night slightly darker with torch/lightning bounce)
+    // Tone mapping exposure (night crushed darker so torches & campfires stand out)
     const baseExposure =
       1.12 * (1.0 - nightFactor) +
-      0.92 * nightFactor +
+      0.78 * nightFactor +
       0.10 * goldenFactor -
       0.08 * stormFactor -
       0.06 * sandstormFactor +
       lightningFlash * 0.45;
-    this.renderer.toneMappingExposure = THREE.MathUtils.clamp(baseExposure, 0.82, 1.65);
+    this.renderer.toneMappingExposure = THREE.MathUtils.clamp(baseExposure, 0.72, 1.65);
 
     // Filmic tint blending
     this.tmpTint.setRGB(1.0, 1.0, 1.0);
@@ -200,8 +200,8 @@ export class AtmospherePostProcess {
       gradeStrength = Math.max(gradeStrength, goldenFactor * 0.28);
     }
     if (nightFactor > 0.01) {
-      this.tmpTint.lerp(this.coolNightTint, nightFactor * 0.85);
-      gradeStrength = Math.max(gradeStrength, nightFactor * 0.30);
+      this.tmpTint.lerp(this.coolNightTint, nightFactor * 0.88);
+      gradeStrength = Math.max(gradeStrength, nightFactor * 0.22);
     }
     if (stormFactor > 0.01 || rainFactor > 0.01) {
       const wet = Math.max(stormFactor, rainFactor * 0.7);
@@ -220,11 +220,11 @@ export class AtmospherePostProcess {
       0.85,
       1.20,
     );
-    this.gradePass.uniforms['uContrast'].value = 1.04 + goldenFactor * 0.04 + nightFactor * 0.05;
+    this.gradePass.uniforms['uContrast'].value = 1.04 + goldenFactor * 0.04 + nightFactor * 0.10;
     this.gradePass.uniforms['uVignette'].value = THREE.MathUtils.clamp(
-      0.18 + nightFactor * 0.16 + stormFactor * 0.14 + sandstormFactor * 0.18 + goldenFactor * 0.04,
+      0.18 + nightFactor * 0.24 + stormFactor * 0.14 + sandstormFactor * 0.18 + goldenFactor * 0.04,
       0.16,
-      0.42,
+      0.46,
     );
   }
 
