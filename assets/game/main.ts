@@ -149,6 +149,7 @@ class SymfonyForeverGame {
   private currentZoneCode = '';
   private targetType: 'MONSTER' | 'PLAYER' | null = null;
   private targetId: number | null = null;
+  private lastTargetMonsterDistText = '';
 
   private activeChatTab: 'ZONE' | 'GLOBAL' | 'PARTY' | 'COMBAT' = 'ZONE';
   private readonly chatHistory: { channel: string; html: string }[] = [];
@@ -384,6 +385,7 @@ class SymfonyForeverGame {
       );
 
       this.updateQuestDistanceLabel();
+      this.refreshTargetedMonsterDistance();
 
       const coordsEl = document.getElementById('hud-coords');
       if (coordsEl) {
@@ -554,13 +556,10 @@ class SymfonyForeverGame {
       }
       const npLabel = entry.nameplate.querySelector('.np-label') as HTMLElement | null;
       if (npLabel) {
-        if (m.state === 'FLEEING') {
-          npLabel.textContent = `🏃 ${m.name} (N.${m.level}) · À l'aide !`;
-          npLabel.style.color = '#fbbf24';
-        } else {
-          npLabel.textContent = `${m.name} (N.${m.level})`;
-          npLabel.style.color = m.isBoss ? '#fde047' : m.aggressive ? '#fca5a5' : '#fef9c3';
-        }
+        const isTargeted = this.targetType === 'MONSTER' && this.targetId === m.id;
+        npLabel.textContent = this.formatMonsterNameplateText(entry, isTargeted);
+        npLabel.style.color =
+          m.state === 'FLEEING' ? '#fbbf24' : m.isBoss ? '#fde047' : m.aggressive ? '#fca5a5' : '#fef9c3';
       }
     }
     for (const [id, entry] of this.monsters) {
@@ -1040,15 +1039,29 @@ class SymfonyForeverGame {
     this.setTarget('MONSTER', next.id);
   }
 
+  private restorePreviousMonsterNameplate(nextType: 'MONSTER' | 'PLAYER' | null, nextId: number | null): void {
+    if (this.targetType === 'MONSTER' && this.targetId !== null && (nextType !== 'MONSTER' || nextId !== this.targetId)) {
+      const prev = this.monsters.get(this.targetId);
+      if (prev) {
+        const npLabel = prev.nameplate.querySelector('.np-label') as HTMLElement | null;
+        if (npLabel) npLabel.textContent = this.formatMonsterNameplateText(prev, false);
+      }
+    }
+  }
+
   private setTarget(type: 'MONSTER' | 'PLAYER', id: number): void {
+    this.restorePreviousMonsterNameplate(type, id);
     this.targetType = type;
     this.targetId = id;
+    this.lastTargetMonsterDistText = '';
     this.updateTargetHud();
   }
 
   private clearTarget(): void {
+    this.restorePreviousMonsterNameplate(null, null);
     this.targetType = null;
     this.targetId = null;
+    this.lastTargetMonsterDistText = '';
     this.updateTargetHud();
   }
 
@@ -1530,12 +1543,50 @@ class SymfonyForeverGame {
     }
   }
 
+  private getMonsterDistanceMeters(entry: MonsterEntry): number {
+    return Math.round(
+      Math.hypot(entry.visual.group.position.x - this.controller.x, entry.visual.group.position.z - this.controller.z),
+    );
+  }
+
+  private formatMonsterNameplateText(entry: MonsterEntry, isTargeted: boolean): string {
+    const m = entry.state;
+    const distTag = isTargeted ? ` (${this.getMonsterDistanceMeters(entry)} m)` : '';
+    if (m.state === 'FLEEING') {
+      return `🏃 ${m.name}${distTag} (N.${m.level}) · À l'aide !`;
+    }
+    return `${m.name}${distTag} (N.${m.level})`;
+  }
+
+  private refreshTargetedMonsterDistance(): void {
+    if (this.targetType !== 'MONSTER' || !this.targetId) {
+      this.lastTargetMonsterDistText = '';
+      return;
+    }
+    const entry = this.monsters.get(this.targetId);
+    if (!entry || entry.state.state === 'DEAD') {
+      return;
+    }
+    const dist = this.getMonsterDistanceMeters(entry);
+    const label = `${entry.state.name} (${dist} m)`;
+    if (label !== this.lastTargetMonsterDistText) {
+      this.lastTargetMonsterDistText = label;
+      const nameEl = document.getElementById('target-name');
+      if (nameEl) nameEl.textContent = label;
+      const npLabel = entry.nameplate.querySelector('.np-label') as HTMLElement | null;
+      if (npLabel) {
+        npLabel.textContent = this.formatMonsterNameplateText(entry, true);
+      }
+    }
+  }
+
   private updateTargetHud(): void {
     const frame = document.getElementById('target-frame');
     const inviteBtn = document.getElementById('btn-target-invite');
     if (!frame) return;
 
     if (!this.targetType || !this.targetId) {
+      this.lastTargetMonsterDistText = '';
       frame.classList.remove('visible');
       if (inviteBtn) inviteBtn.style.display = 'none';
       return;
@@ -1550,13 +1601,18 @@ class SymfonyForeverGame {
 
     if (this.targetType === 'MONSTER') {
       if (inviteBtn) inviteBtn.style.display = 'none';
-      const m = this.monsters.get(this.targetId)?.state;
-      if (!m || m.state === 'DEAD') {
+      const entry = this.monsters.get(this.targetId);
+      const m = entry?.state;
+      if (!entry || !m || m.state === 'DEAD') {
         this.clearTarget();
         return;
       }
       frame.classList.add('visible');
-      if (nameEl) nameEl.textContent = m.name;
+      const label = `${m.name} (${this.getMonsterDistanceMeters(entry)} m)`;
+      this.lastTargetMonsterDistText = label;
+      if (nameEl) nameEl.textContent = label;
+      const npLabel = entry.nameplate.querySelector('.np-label') as HTMLElement | null;
+      if (npLabel) npLabel.textContent = this.formatMonsterNameplateText(entry, true);
       if (lvlEl) lvlEl.textContent = `Niv. ${m.level}`;
       if (hpBar) hpBar.className = 'bar bar-hp-enemy';
       if (hpFill) hpFill.style.width = `${(m.hp / Math.max(1, m.maxHp)) * 100}%`;
@@ -1579,6 +1635,7 @@ class SymfonyForeverGame {
     }
 
     // Player target (self or remote)
+    this.lastTargetMonsterDistText = '';
     const isSelf = this.targetId === this.characterId;
     const p = isSelf ? this.selfState : this.remotePlayers.get(this.targetId)?.state;
     if (!p) {
