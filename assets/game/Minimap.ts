@@ -1,4 +1,4 @@
-import type { LandmarkMeta, MonsterState, NpcData, PublicPlayer, QuestStatePayload, WorldBossSummary } from './types';
+import type { LandmarkMeta, MonsterState, NpcData, PublicPlayer, QuestStatePayload, VillageMeta, WorldBossSummary } from './types';
 
 export class Minimap {
   private readonly ctx: CanvasRenderingContext2D;
@@ -9,6 +9,7 @@ export class Minimap {
     private readonly worldSize: number,
     private readonly landmarks: LandmarkMeta[],
     minimapUrl: string,
+    private readonly villages: VillageMeta[] = [],
   ) {
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('Minimap 2D context unavailable');
@@ -49,6 +50,16 @@ export class Minimap {
       ((wx / this.worldSize) + 0.5) * w,
       ((wz / this.worldSize) + 0.5) * h,
     ];
+
+    // Villages across La Réunion (radius scaled with village house count / population)
+    for (const v of this.villages) {
+      const [vx, vy] = toPx(v.x, v.z);
+      const r = v.houses >= 18 ? 2.7 : v.houses >= 11 ? 2.1 : 1.6;
+      ctx.fillStyle = v.isZoneCamp ? 'rgba(45, 212, 191, 0.78)' : 'rgba(251, 191, 36, 0.65)';
+      ctx.beginPath();
+      ctx.arc(vx, vy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     // Landmarks
     for (const lm of this.landmarks) {

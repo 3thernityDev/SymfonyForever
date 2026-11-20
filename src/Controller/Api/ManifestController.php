@@ -56,6 +56,7 @@ final class ManifestController extends AbstractController
                 'minimapUrl' => '/assets/map/reunion_minimap.png?v=7168_768',
             ],
             'zones' => WorldCatalog::zones(),
+            'villages' => WorldCatalog::villages(),
             'landmarks' => WorldCatalog::landmarks(),
             'trails' => WorldCatalog::trails(),
             'npcs' => $npcRegistry->toManifestArray($terrainService),

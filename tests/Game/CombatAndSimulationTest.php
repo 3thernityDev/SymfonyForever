@@ -859,4 +859,61 @@ final class CombatAndSimulationTest extends KernelTestCase
         self::assertSame(MonsterInstance::STATE_IDLE, $townGuardTarget->getState(), 'Un joueur en ville ne doit pas être attaqué automatiquement la nuit.');
         self::assertSame(MonsterInstance::STATE_IDLE, $cilaosGuardTarget->getState(), 'Un joueur proche d\'un checkpoint ne doit pas être attaqué automatiquement la nuit.');
     }
+
+    public function testAttacksAndSkillsAutomaticallyTargetNearestAliveMonster(): void
+    {
+        $now = 60000.0;
+        $user = (new User())->setUsername('autotarget')->setEmail('auto@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $hub = WorldCatalog::zones()['lagon_ouest'];
+        $hx = $hub['respawnX'];
+        $hz = $hub['respawnZ'];
+
+        $dps = (new Character($user, 'AutoDps', CharacterClass::DPS))
+            ->setLevel(10)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now);
+        $tank = (new Character($user, 'AutoTank', CharacterClass::TANK))
+            ->setLevel(10)->setZoneCode('lagon_ouest')->setPosX($hx)->setPosY(12.0)->setPosZ($hz)->setLastSeenAt($now);
+
+        foreach ([$dps, $tank] as $c) {
+            $s = $this->stats->compute($c, $now);
+            $c->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
+            $this->em->persist($c);
+        }
+
+        $tpl = (new MonsterTemplate('auto_mob', 'Crabe Cible'))
+            ->setLevel(5)->setMaxHp(500)->setAttack(10)->setDefense(4)->setXpReward(40);
+        $this->em->persist($tpl);
+
+        $farOutMob = new MonsterInstance($tpl, 'lagon_ouest', $hx + 30.0, 12.0, $hz);
+        $midMob = new MonsterInstance($tpl, 'lagon_ouest', $hx + 6.5, 12.0, $hz);
+        $nearestMob = new MonsterInstance($tpl, 'lagon_ouest', $hx + 2.2, 12.0, $hz);
+        $this->em->persist($farOutMob);
+        $this->em->persist($midMob);
+        $this->em->persist($nearestMob);
+        $this->em->flush();
+
+        // 1. Auto-attack with no target selected automatically hits the nearest alive monster
+        $aaRes = $this->combat->performAutoAttack($dps, null, null, $now);
+        self::assertTrue($aaRes['ok']);
+        self::assertSame('MONSTER', $aaRes['targetType'] ?? null);
+        self::assertSame($nearestMob->getId(), $aaRes['targetId'] ?? null);
+        self::assertLessThan(500, $nearestMob->getCurrentHp());
+        self::assertSame(500, $midMob->getCurrentHp());
+
+        // 2. Offensive skill with a distant out-of-range monster selected automatically switches to the nearest alive monster
+        $hpBeforeSkill = $nearestMob->getCurrentHp();
+        $skillRes = $this->combat->castSkill($dps, 'ember_strike', 'MONSTER', $farOutMob->getId(), $now + 2.0);
+        self::assertTrue($skillRes['ok']);
+        self::assertSame('MONSTER', $skillRes['targetType'] ?? null);
+        self::assertSame($nearestMob->getId(), $skillRes['targetId'] ?? null);
+        self::assertLessThan($hpBeforeSkill, $nearestMob->getCurrentHp());
+        self::assertSame(500, $farOutMob->getCurrentHp());
+
+        // 3. Tank SELF_AOE (seismic_slam) also reports the nearest hit monster as targetId
+        $aoeRes = $this->combat->castSkill($tank, 'seismic_slam', null, null, $now + 4.0);
+        self::assertTrue($aoeRes['ok']);
+        self::assertSame('MONSTER', $aoeRes['targetType'] ?? null);
+        self::assertSame($nearestMob->getId(), $aoeRes['targetId'] ?? null);
+    }
 }

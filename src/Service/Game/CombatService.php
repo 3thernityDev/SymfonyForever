@@ -96,6 +96,8 @@ final class CombatService
         $createdEvents = [];
         $xpGained = 0;
         $leveledUp = false;
+        $resolvedTargetType = null;
+        $resolvedTargetId = null;
 
         switch ($skill->targetType) {
             case 'SELF':
@@ -149,6 +151,8 @@ final class CombatService
                     $this->em->persist($ev);
                     $createdEvents[] = $ev;
                 } else {
+                    $resolvedTargetType = 'MONSTER';
+                    $resolvedTargetId = (int) $enemies[0]->getId();
                     foreach ($enemies as $enemy) {
                         [$xp, $lvl] = $this->applyDamageToMonster($caster, $enemy, $skill, $stats, $now, $createdEvents);
                         $xpGained += $xp;
@@ -163,14 +167,30 @@ final class CombatService
                     ? $this->monsterRepository->find($targetId)
                     : null;
 
-                if (!$monster instanceof MonsterInstance || $monster->getState() === MonsterInstance::STATE_DEAD) {
+                $isAliveTarget = $monster instanceof MonsterInstance && $monster->getState() !== MonsterInstance::STATE_DEAD;
+                $dist = $isAliveTarget
+                    ? $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ())
+                    : INF;
+
+                if (!$isAliveTarget || $dist > $skill->range) {
+                    $nearest = $this->resolveNearestAliveMonsterInRange($caster, $skill->range);
+                    if ($nearest instanceof MonsterInstance) {
+                        $monster = $nearest;
+                        $isAliveTarget = true;
+                        $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
+                    }
+                }
+
+                if (!$isAliveTarget || !$monster instanceof MonsterInstance) {
                     return ['ok' => false, 'error' => 'Sélectionnez un ennemi vivant (Tab ou clic).', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
                 }
 
-                $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
                 if ($dist > $skill->range) {
                     return ['ok' => false, 'error' => sprintf('Cible trop éloignée (portée %.0fm).', $skill->range), 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
                 }
+
+                $resolvedTargetType = 'MONSTER';
+                $resolvedTargetId = (int) $monster->getId();
 
                 $targets = [$monster];
                 if ($skill->targetType === 'ENEMY_AOE') {
@@ -196,19 +216,25 @@ final class CombatService
 
         $this->em->flush();
 
-        return [
+        $out = [
             'ok' => true,
             'events' => array_map(static fn (CombatEvent $e): array => $e->toArray(), $createdEvents),
             'xpGained' => $xpGained,
             'leveledUp' => $leveledUp,
         ];
+        if ($resolvedTargetType !== null && $resolvedTargetId !== null) {
+            $out['targetType'] = $resolvedTargetType;
+            $out['targetId'] = $resolvedTargetId;
+        }
+
+        return $out;
     }
 
     /**
      * Performs a left-click basic auto-attack (0 resource cost, generates class resource,
      * independent 1.2s swing timer, balanced to kill same-level monsters in ~30s / ~25 hits).
      *
-     * @return array{ok: bool, error?: string, events: list<array<string, mixed>>, xpGained: int, leveledUp: bool, resourceGain?: int}
+     * @return array{ok: bool, error?: string, events: list<array<string, mixed>>, xpGained: int, leveledUp: bool, resourceGain?: int, targetType?: string, targetId?: int}
      */
     public function performAutoAttack(
         Character $caster,
@@ -232,17 +258,31 @@ final class CombatService
             return ['ok' => false, 'error' => 'Auto-attaque en recharge.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
         }
 
+        $cls = $caster->getCharacterClass();
+        $range = $cls === CharacterClass::HEAL ? 18.0 : 8.5;
+
         $monster = ($targetType === 'MONSTER' && $targetId !== null)
             ? $this->monsterRepository->find($targetId)
             : null;
 
-        if (!$monster instanceof MonsterInstance || $monster->getState() === MonsterInstance::STATE_DEAD) {
+        $isAliveTarget = $monster instanceof MonsterInstance && $monster->getState() !== MonsterInstance::STATE_DEAD;
+        $dist = $isAliveTarget
+            ? $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ())
+            : INF;
+
+        if (!$isAliveTarget || $dist > $range) {
+            $nearest = $this->resolveNearestAliveMonsterInRange($caster, $range);
+            if ($nearest instanceof MonsterInstance) {
+                $monster = $nearest;
+                $isAliveTarget = true;
+                $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
+            }
+        }
+
+        if (!$isAliveTarget || !$monster instanceof MonsterInstance) {
             return ['ok' => false, 'error' => 'Sélectionnez un ennemi vivant pour attaquer.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
         }
 
-        $cls = $caster->getCharacterClass();
-        $range = $cls === CharacterClass::HEAL ? 18.0 : 8.5;
-        $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
         if ($dist > $range) {
             return ['ok' => false, 'error' => sprintf('Cible trop éloignée pour l\'auto-attaque (%.0fm).', $range), 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
         }
@@ -334,6 +374,8 @@ final class CombatService
             'xpGained' => $xpGained,
             'leveledUp' => $leveledUp,
             'resourceGain' => $resourceGain,
+            'targetType' => 'MONSTER',
+            'targetId' => (int) $monster->getId(),
         ];
     }
 
@@ -807,6 +849,13 @@ final class CombatService
         );
         $this->em->persist($ev);
         $createdEvents[] = $ev;
+    }
+
+    private function resolveNearestAliveMonsterInRange(Character $caster, float $range): ?MonsterInstance
+    {
+        $nearby = $this->monsterRepository->findAliveInRadius($caster->getPosX(), $caster->getPosZ(), $range);
+
+        return $nearby[0] ?? null;
     }
 
     private function resolveAllyTarget(Character $caster, ?string $targetType, ?int $targetId): ?Character

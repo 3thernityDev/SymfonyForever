@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TerrainSampler } from './TerrainSampler';
-import type { LandmarkMeta, NpcData, TrailPoint, ZoneMeta } from './types';
+import type { LandmarkMeta, NpcData, TrailPoint, VillageMeta, ZoneMeta } from './types';
 import { createSoftParticleTexture, type WeatherFrameFactors } from './WeatherSystem';
 
 export interface AtmosphereFrameResult {
@@ -123,6 +123,7 @@ export class ReunionWorldRenderer {
     zones?: Record<string, ZoneMeta>,
     npcs?: NpcData[],
     trails?: TrailPoint[][],
+    villages?: VillageMeta[],
   ) {
     this.scene = scene;
 
@@ -364,10 +365,10 @@ export class ReunionWorldRenderer {
     scene.add(this.waterMesh);
 
     // 4. Environment: Dense flora, flowers, rocks, pirogues, waterfalls, fumaroles, villages & torches
-    const clearZones = this.buildClearZones(zones, landmarks, npcs, hubX, hubZ, bossX, bossZ);
+    const clearZones = this.buildClearZones(zones, landmarks, npcs, villages, hubX, hubZ, bossX, bossZ);
     this.populateVegetationAndRocks(sampler, clearZones);
     this.buildCoastalPiroguesAndFeatures(sampler, bossX, bossZ, hubX, hubZ);
-    this.buildAllZoneVillagesAndLandmarks(sampler, landmarks, zones, npcs, hubX, hubZ);
+    this.buildAllZoneVillagesAndLandmarks(sampler, landmarks, zones, npcs, villages, hubX, hubZ);
     this.placeRoadsideTrailTorches(sampler, trails, zones, npcs, bossX, bossZ);
     this.renderTorchInstances();
     this.buildDistantNightLights();
@@ -668,15 +669,22 @@ export class ReunionWorldRenderer {
     zones: Record<string, ZoneMeta> | undefined,
     landmarks: LandmarkMeta[],
     npcs: NpcData[] | undefined,
+    villages: VillageMeta[] | undefined,
     hubX: number,
     hubZ: number,
     bossX: number,
     bossZ: number,
   ): { x: number; z: number; r: number }[] {
     const list: { x: number; z: number; r: number }[] = [
-      { x: hubX, z: hubZ, r: 44 },
+      { x: hubX, z: hubZ, r: 56 },
       { x: bossX, z: bossZ, r: 85 },
     ];
+    if (villages && villages.length > 0) {
+      for (const v of villages) {
+        const r = v.houses >= 16 ? 58 : v.houses >= 9 ? 46 : 38;
+        list.push({ x: v.x, z: v.z, r });
+      }
+    }
     if (zones) {
       for (const z of Object.values(zones)) {
         list.push({ x: z.respawnX, z: z.respawnZ, r: 38 });
@@ -934,49 +942,255 @@ export class ReunionWorldRenderer {
     landmarks: LandmarkMeta[],
     zones: Record<string, ZoneMeta> | undefined,
     npcs: NpcData[] | undefined,
+    villages: VillageMeta[] | undefined,
     hubX: number,
     hubZ: number,
   ): void {
-    const campConfigs = zones
-      ? Object.values(zones).map((z) => ({ code: z.code, x: z.respawnX, z: z.respawnZ }))
-      : landmarks.filter((l) => l.type !== 'boss').map((l, idx) => ({ code: l.name + '_' + idx, x: l.x, z: l.z }));
+    const villageConfigs: {
+      code: string;
+      name: string;
+      zoneCode: string;
+      x: number;
+      z: number;
+      houses: number;
+    }[] =
+      villages && villages.length > 0
+        ? villages.map((v) => ({
+            code: v.code,
+            name: v.name,
+            zoneCode: v.zoneCode,
+            x: v.x,
+            z: v.z,
+            houses: Math.max(3, v.houses),
+          }))
+        : zones
+          ? Object.values(zones).map((z) => ({
+              code: z.code,
+              name: z.name,
+              zoneCode: z.code,
+              x: z.respawnX,
+              z: z.respawnZ,
+              houses: z.code === 'lagon_ouest' ? 18 : 6,
+            }))
+          : landmarks
+              .filter((l) => l.type !== 'boss')
+              .map((l, idx) => ({
+                code: l.name + '_' + idx,
+                name: l.name,
+                zoneCode: 'lagon_ouest',
+                x: l.x,
+                z: l.z,
+                houses: 5,
+              }));
 
-    const villageLayouts = [
-      { angle: 2.4, roof: 0xdc2626, wall: 0xfef3c7 },
-      { angle: -2.2, roof: 0x0284c7, wall: 0xe0f2fe },
-      { angle: 0.7, roof: 0x16a34a, wall: 0xfef9c3 },
+    const zonePalettes: Record<string, { walls: number[]; roofs: number[] }> = {
+      lagon_ouest: {
+        walls: [0xfef3c7, 0xe0f2fe, 0xfef9c3, 0xffedd5],
+        roofs: [0xdc2626, 0x0284c7, 0xea580c, 0x0d9488],
+      },
+      salazie: {
+        walls: [0xecfdf5, 0xfef9c3, 0xdcfce7, 0xe0f2fe],
+        roofs: [0x16a34a, 0x15803d, 0xdc2626, 0x047857],
+      },
+      mafate: {
+        walls: [0xf1f5f9, 0xfef3c7, 0xe2e8f0, 0xfde68a],
+        roofs: [0xb91c1c, 0x475569, 0x0369a1, 0x92400e],
+      },
+      cilaos: {
+        walls: [0xfff7ed, 0xe0f2fe, 0xfef2f2, 0xfef9c3],
+        roofs: [0x1d4ed8, 0x0284c7, 0xc2410c, 0x1e40af],
+      },
+      sud_sauvage: {
+        walls: [0xcbd5e1, 0xe2e8f0, 0xfef3c7, 0x94a3b8],
+        roofs: [0x334155, 0x991b1b, 0x0f766e, 0x1e293b],
+      },
+      piton_neiges: {
+        walls: [0xd6cfc7, 0xcbd5e1, 0xe2e8f0],
+        roofs: [0x64748b, 0x475569, 0x334155],
+      },
+      fournaise: {
+        walls: [0xe7e5e4, 0xfed7aa, 0xcbd5e1, 0x94a3b8],
+        roofs: [0x7c2d12, 0x9a3412, 0xb45309, 0x475569],
+      },
+    };
+
+    const hutBaseGeo = new THREE.BoxGeometry(6.8, 3.9, 5.0);
+    hutBaseGeo.translate(0, 1.95, 0);
+    const hutRoofGeo = new THREE.ConeGeometry(5.35, 2.75, 4);
+    hutRoofGeo.rotateY(Math.PI / 4);
+    hutRoofGeo.translate(0, 5.15, 0);
+    const hutVerandaGeo = new THREE.BoxGeometry(6.9, 0.22, 1.45);
+    hutVerandaGeo.translate(0, 3.35, 3.05);
+    const hutPillarGeo = new THREE.CylinderGeometry(0.11, 0.13, 3.3, 5);
+    hutPillarGeo.translate(0, 1.65, 0);
+    const hutWinGeo = new THREE.BoxGeometry(1.05, 1.05, 0.16);
+    const hutDoorGeo = new THREE.BoxGeometry(1.18, 2.08, 0.15);
+    const doorMat = new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 });
+    const signBoardMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.85, flatShading: true });
+    const wallMatCache = new Map<number, THREE.MeshStandardMaterial>();
+    const roofMatCache = new Map<number, THREE.MeshStandardMaterial>();
+
+    const getWallMat = (hex: number): THREE.MeshStandardMaterial => {
+      let m = wallMatCache.get(hex);
+      if (!m) {
+        m = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.82, flatShading: true });
+        wallMatCache.set(hex, m);
+      }
+      return m;
+    };
+    const getRoofMat = (hex: number): THREE.MeshStandardMaterial => {
+      let m = roofMatCache.get(hex);
+      if (!m) {
+        m = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.7, flatShading: true });
+        roofMatCache.set(hex, m);
+      }
+      return m;
+    };
+
+    const ringSpecs = [
+      { radius: 20.5, maxHouses: 6, angleOffset: 0.42 },
+      { radius: 32.5, maxHouses: 9, angleOffset: 0.95 },
+      { radius: 45.0, maxHouses: 13, angleOffset: 0.18 },
     ];
 
-    campConfigs.forEach((camp, cIdx) => {
-      const hutCount = camp.code === 'lagon_ouest' ? 3 : 2;
-      for (let hIdx = 0; hIdx < hutCount; hIdx++) {
-        const cfg = villageLayouts[(hIdx + cIdx) % villageLayouts.length];
-        const dist = 20.5;
-        const hx = camp.x + Math.cos(cfg.angle) * dist;
-        const hz = camp.z + Math.sin(cfg.angle) * dist;
-        const hy = sampler.getHeight(hx, hz);
+    villageConfigs.forEach((village, vIdx) => {
+      const targetHouses = Math.max(3, village.houses);
+      const palette = zonePalettes[village.zoneCode] ?? zonePalettes['lagon_ouest'];
+      const placedHouses: { x: number; z: number }[] = [];
 
-        const wallColor =
-          camp.code === 'piton_neiges' ? 0xd6cfc7 : camp.code === 'fournaise' || camp.code === 'sud_sauvage' ? 0x475569 : cfg.wall;
-        const roofColor =
-          camp.code === 'piton_neiges' ? 0x64748b : camp.code === 'fournaise' ? 0x7c2d12 : cfg.roof;
+      let remaining = targetHouses;
+      let globalHouseIdx = 0;
 
-        this.addCreoleHut(hx, hy, hz, Math.atan2(camp.x - hx, camp.z - hz), wallColor, roofColor);
+      for (let rIdx = 0; rIdx < ringSpecs.length && remaining > 0; rIdx++) {
+        const ring = ringSpecs[rIdx];
+        const countInRing = rIdx === ringSpecs.length - 1 ? remaining : Math.min(ring.maxHouses, remaining);
+        remaining -= countInRing;
+
+        for (let i = 0; i < countInRing; i++) {
+          const baseAng = (i / countInRing) * Math.PI * 2 + ring.angleOffset + vIdx * 0.37;
+          const jitterAng = Math.sin(globalHouseIdx * 2.17 + vIdx * 1.31) * 0.08;
+          const jitterRad = Math.cos(globalHouseIdx * 1.73 + vIdx * 0.89) * 1.15;
+
+          let chosenX: number | null = null;
+          let chosenZ: number | null = null;
+          let chosenY = 0;
+
+          // Try candidate spot, nudging angle/radius if a spot touches water, steep cliff, NPC, or another house
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const tryAng = baseAng + jitterAng + attempt * 0.24 * (attempt % 2 === 0 ? 1 : -1);
+            const tryRad = ring.radius + jitterRad + (attempt >= 4 ? -3.5 : 0);
+            const hx = village.x + Math.cos(tryAng) * tryRad;
+            const hz = village.z + Math.sin(tryAng) * tryRad;
+            const hy = sampler.getHeight(hx, hz);
+
+            if (hy <= sampler.seaLevel + 1.0 || sampler.getSlope(hx, hz) > 1.25) continue;
+            if (Math.hypot(hx - (village.x + 7.5), hz - (village.z - 7.5)) < 6.0) continue;
+
+            let blocked = false;
+            if (npcs) {
+              for (const npc of npcs) {
+                if (Math.hypot(hx - npc.x, hz - npc.z) < 6.5) {
+                  blocked = true;
+                  break;
+                }
+              }
+            }
+            if (blocked) continue;
+
+            for (const prev of placedHouses) {
+              if (Math.hypot(hx - prev.x, hz - prev.z) < 8.0) {
+                blocked = true;
+                break;
+              }
+            }
+            if (blocked) continue;
+
+            chosenX = hx;
+            chosenZ = hz;
+            chosenY = hy;
+            break;
+          }
+
+          if (chosenX === null || chosenZ === null) {
+            const fallbackAng = baseAng;
+            chosenX = village.x + Math.cos(fallbackAng) * ring.radius;
+            chosenZ = village.z + Math.sin(fallbackAng) * ring.radius;
+            chosenY = Math.max(sampler.seaLevel + 1.2, sampler.getHeight(chosenX, chosenZ));
+          }
+
+          placedHouses.push({ x: chosenX, z: chosenZ });
+
+          const wallColor = palette.walls[(globalHouseIdx + vIdx) % palette.walls.length];
+          const roofColor = palette.roofs[(globalHouseIdx * 2 + vIdx) % palette.roofs.length];
+          const faceAngle = Math.atan2(village.x - chosenX, village.z - chosenZ);
+          const scaleW = 0.92 + ((globalHouseIdx + vIdx) % 3) * 0.08;
+          const scaleH = 0.94 + ((globalHouseIdx * 2 + vIdx) % 3) * 0.07;
+
+          this.addCreoleHut(
+            chosenX,
+            chosenY,
+            chosenZ,
+            faceAngle,
+            getWallMat(wallColor),
+            getRoofMat(roofColor),
+            doorMat,
+            hutBaseGeo,
+            hutRoofGeo,
+            hutVerandaGeo,
+            hutPillarGeo,
+            hutWinGeo,
+            hutDoorGeo,
+            scaleW,
+            scaleH,
+          );
+          globalHouseIdx++;
+        }
       }
 
-      // Village campfire offset safely from spawn center
-      const cfX = camp.x + 6.5;
-      const cfZ = camp.z + 6.5;
+      // Village central campfire offset safely from spawn center
+      const cfX = village.x + 6.5;
+      const cfZ = village.z + 6.5;
       const cfY = sampler.getHeight(cfX, cfZ);
-      this.addCampfire(cfX, cfY, cfZ, cIdx * 1.1);
+      this.addCampfire(cfX, cfY, cfZ, vIdx * 1.1);
 
-      // Ring of 6 village perimeter torches
-      for (let tIdx = 0; tIdx < 6; tIdx++) {
-        const ang = (tIdx / 6) * Math.PI * 2 + 0.35;
-        const tx = camp.x + Math.cos(ang) * 15.5;
-        const tz = camp.z + Math.sin(ang) * 15.5;
+      // Creole wooden village signpost at plaza entrance
+      const spX = village.x - 5.2;
+      const spZ = village.z + 5.2;
+      const spY = sampler.getHeight(spX, spZ);
+      if (spY > sampler.seaLevel + 0.8) {
+        const signGroup = new THREE.Group();
+        signGroup.position.set(spX, spY, spZ);
+        signGroup.rotation.y = vIdx * 0.6 + 0.5;
+        const post = new THREE.Mesh(hutPillarGeo, doorMat);
+        const board = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.72, 0.18), signBoardMat);
+        board.position.set(0, 2.75, 0);
+        signGroup.add(post, board);
+        this.scene.add(signGroup);
+      }
+
+      // Inner plaza torches (6) + outer street torches for larger populated towns
+      const innerTorches = targetHouses >= 6 ? 6 : 4;
+      for (let tIdx = 0; tIdx < innerTorches; tIdx++) {
+        const ang = (tIdx / innerTorches) * Math.PI * 2 + 0.35;
+        const tx = village.x + Math.cos(ang) * 15.5;
+        const tz = village.z + Math.sin(ang) * 15.5;
         const ty = sampler.getHeight(tx, tz);
-        this.torchSites.push({ x: tx, y: ty, z: tz, isCampfire: false, phase: tIdx * 0.9 + cIdx });
+        if (ty > sampler.seaLevel + 0.8) {
+          this.torchSites.push({ x: tx, y: ty, z: tz, isCampfire: false, phase: tIdx * 0.9 + vIdx });
+        }
+      }
+
+      if (targetHouses >= 11) {
+        const outerTorches = targetHouses >= 18 ? 6 : 4;
+        for (let tIdx = 0; tIdx < outerTorches; tIdx++) {
+          const ang = (tIdx / outerTorches) * Math.PI * 2 + 0.78;
+          const tx = village.x + Math.cos(ang) * 28.0;
+          const tz = village.z + Math.sin(ang) * 28.0;
+          const ty = sampler.getHeight(tx, tz);
+          if (ty > sampler.seaLevel + 0.8) {
+            this.torchSites.push({ x: tx, y: ty, z: tz, isCampfire: false, phase: (tIdx + 6) * 0.85 + vIdx });
+          }
+        }
       }
     });
 
@@ -1036,41 +1250,50 @@ export class ReunionWorldRenderer {
     void hubZ;
   }
 
-  private addCreoleHut(x: number, y: number, z: number, rotY: number, wallColor: number, roofColor: number): void {
+  private addCreoleHut(
+    x: number,
+    y: number,
+    z: number,
+    rotY: number,
+    wallMat: THREE.MeshStandardMaterial,
+    roofMat: THREE.MeshStandardMaterial,
+    doorMat: THREE.MeshStandardMaterial,
+    baseGeo: THREE.BufferGeometry,
+    roofGeo: THREE.BufferGeometry,
+    verandaGeo: THREE.BufferGeometry,
+    pillarGeo: THREE.BufferGeometry,
+    winGeo: THREE.BufferGeometry,
+    doorGeo: THREE.BufferGeometry,
+    scaleW = 1.0,
+    scaleH = 1.0,
+  ): void {
     const hut = new THREE.Group();
     hut.position.set(x, y, z);
     hut.rotation.y = rotY;
+    hut.scale.set(scaleW, scaleH, scaleW);
 
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(7.0, 4.0, 5.2),
-      new THREE.MeshStandardMaterial({ color: wallColor, roughness: 0.82, flatShading: true }),
-    );
-    base.position.y = 2.0;
-
-    const roof = new THREE.Mesh(
-      new THREE.ConeGeometry(5.5, 2.8, 4),
-      new THREE.MeshStandardMaterial({ color: roofColor, roughness: 0.72, flatShading: true }),
-    );
-    roof.position.y = 5.3;
-    roof.rotation.y = Math.PI / 4;
+    const base = new THREE.Mesh(baseGeo, wallMat);
+    const roof = new THREE.Mesh(roofGeo, roofMat);
+    const veranda = new THREE.Mesh(verandaGeo, roofMat);
+    const pillarL = new THREE.Mesh(pillarGeo, doorMat);
+    pillarL.position.set(-2.85, 0, 3.55);
+    const pillarR = new THREE.Mesh(pillarGeo, doorMat);
+    pillarR.position.set(2.85, 0, 3.55);
 
     // Warm emissive windows facing camp plaza & sides (light up brightly at night!)
-    const frontWinL = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 0.15), this.windowMat);
-    frontWinL.position.set(-1.6, 2.2, 2.62);
-    const frontWinR = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 0.15), this.windowMat);
-    frontWinR.position.set(1.6, 2.2, 2.62);
-    const door = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 2.1, 0.14),
-      new THREE.MeshStandardMaterial({ color: 0x5c3a21, roughness: 0.9 }),
-    );
-    door.position.set(0, 1.05, 2.62);
+    const frontWinL = new THREE.Mesh(winGeo, this.windowMat);
+    frontWinL.position.set(-1.6, 2.15, 2.52);
+    const frontWinR = new THREE.Mesh(winGeo, this.windowMat);
+    frontWinR.position.set(1.6, 2.15, 2.52);
+    const door = new THREE.Mesh(doorGeo, doorMat);
+    door.position.set(0, 1.04, 2.52);
 
-    hut.add(base, roof, frontWinL, frontWinR, door);
+    hut.add(base, roof, veranda, pillarL, pillarR, frontWinL, frontWinR, door);
     this.scene.add(hut);
 
     this.distantLightSites.push({
       x: x + Math.sin(rotY) * 2.9,
-      y: y + 2.3,
+      y: y + 2.3 * scaleH,
       z: z + Math.cos(rotY) * 2.9,
       color: 0xffc864,
       poolSize: 14,

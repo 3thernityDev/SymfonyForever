@@ -70,6 +70,17 @@ export interface LandmarkMeta {
   type: string;
 }
 
+export interface VillageMeta {
+  code: string;
+  name: string;
+  zoneCode: string;
+  x: number;
+  z: number;
+  population: number;
+  houses: number;
+  isZoneCamp: boolean;
+}
+
 export interface TrailPoint {
   x: number;
   z: number;
@@ -208,6 +219,7 @@ export interface ManifestResponse {
     minimapUrl: string;
   };
   zones: Record<string, ZoneMeta>;
+  villages?: VillageMeta[];
   landmarks: LandmarkMeta[];
   trails?: TrailPoint[][];
   npcs: NpcData[];

@@ -128,4 +128,57 @@ final class ReunionTerrainServiceTest extends KernelTestCase
             }
         }
     }
+
+    public function testAllReunionTownsHaveWalkableVillagesInTheirZoneWithHousesScaledByPopulation(): void
+    {
+        $zones = WorldCatalog::zones();
+        $villages = WorldCatalog::villages();
+        self::assertGreaterThanOrEqual(24, count($villages), 'Chaque ville/commune de La Réunion doit posséder son village.');
+
+        $byCode = [];
+        $countByZone = [];
+        foreach ($villages as $v) {
+            $byCode[$v['code']] = $v;
+            $countByZone[$v['zoneCode']] = ($countByZone[$v['zoneCode']] ?? 0) + 1;
+
+            self::assertArrayHasKey($v['zoneCode'], $zones, sprintf('Zone %s invalide pour %s.', $v['zoneCode'], $v['name']));
+            self::assertTrue(
+                $this->terrain->isWalkable($v['x'], $v['z']),
+                sprintf('Le village de %s (%.1f, %.1f) doit être sur un terrain marchable.', $v['name'], $v['x'], $v['z']),
+            );
+            self::assertSame(
+                $v['zoneCode'],
+                $this->terrain->getZoneCode($v['x'], $v['z']),
+                sprintf('Le village de %s doit se trouver dans sa zone %s.', $v['name'], $v['zoneCode']),
+            );
+            self::assertTrue(
+                WorldCatalog::isInSafeSanctuary($v['x'], $v['z']),
+                sprintf('Le village de %s doit être reconnu comme sanctuaire de ville.', $v['name']),
+            );
+            self::assertGreaterThanOrEqual(3, $v['houses']);
+        }
+
+        // Every one of the 7 zones must contain at least one village
+        foreach (array_keys($zones) as $zoneCode) {
+            self::assertGreaterThanOrEqual(1, $countByZone[$zoneCode] ?? 0, sprintf('La zone %s doit comporter au moins un village.', $zoneCode));
+        }
+
+        // More populated towns must always have >= houses than less populated towns, and major cities strictly more
+        foreach ($villages as $a) {
+            foreach ($villages as $b) {
+                if ($a['population'] > $b['population']) {
+                    self::assertGreaterThanOrEqual(
+                        $b['houses'],
+                        $a['houses'],
+                        sprintf('%s (%d hab., %d maisons) doit avoir au moins autant de maisons que %s (%d hab., %d maisons).', $a['name'], $a['population'], $a['houses'], $b['name'], $b['population'], $b['houses']),
+                    );
+                }
+            }
+        }
+
+        self::assertGreaterThan($byCode['saint_paul']['houses'], $byCode['saint_denis']['houses']);
+        self::assertGreaterThan($byCode['saint_leu']['houses'], $byCode['saint_pierre']['houses']);
+        self::assertGreaterThan($byCode['cilaos']['houses'], $byCode['saint_leu']['houses']);
+        self::assertGreaterThan($byCode['mafate']['houses'], $byCode['cilaos']['houses']);
+    }
 }

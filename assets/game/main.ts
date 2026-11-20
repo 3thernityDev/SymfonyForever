@@ -147,6 +147,7 @@ class SymfonyForeverGame {
   private lastChatId = 0;
   private consecutiveSyncErrors = 0;
   private currentZoneCode = '';
+  private currentVillageCode = '';
   private targetType: 'MONSTER' | 'PLAYER' | null = null;
   private targetId: number | null = null;
   private lastTargetMonsterDistText = '';
@@ -205,6 +206,7 @@ class SymfonyForeverGame {
         this.manifest.zones,
         this.manifest.npcs,
         this.manifest.trails,
+        this.manifest.villages,
       );
       this.weatherSystem = new WeatherSystem(this.scene);
       this.vfx = new VfxManager(this.scene, this.floatingLayer);
@@ -225,6 +227,7 @@ class SymfonyForeverGame {
         this.manifest.world.worldSize,
         this.manifest.landmarks,
         this.manifest.world.minimapUrl,
+        this.manifest.villages ?? [],
       );
 
       this.setupHudBindings();
@@ -477,9 +480,36 @@ class SymfonyForeverGame {
     }
 
     if (resp.zone) {
+      let currentVillageLabel = '';
+      if (this.manifest.villages) {
+        let bestV = null;
+        let bestDist = 56.0;
+        for (const v of this.manifest.villages) {
+          const d = Math.hypot(this.controller.x - v.x, this.controller.z - v.z);
+          if (d <= bestDist) {
+            bestDist = d;
+            bestV = v;
+          }
+        }
+        if (bestV) {
+          currentVillageLabel = ` · 🏘️ ${bestV.name} (${bestV.houses} cases)`;
+          if (bestV.code !== this.currentVillageCode) {
+            this.currentVillageCode = bestV.code;
+            if (!isFirst) {
+              this.showZoneBanner(
+                bestV.name,
+                `Village de ${resp.zone.name} · ${bestV.houses} maisons (${bestV.population.toLocaleString('fr-FR')} hab.)`,
+              );
+            }
+          }
+        } else {
+          this.currentVillageCode = '';
+        }
+      }
+
       const zSub = document.getElementById('zone-sub');
       if (zSub) {
-        const baseLvl = `Niv. ${resp.zone.minLevel}–${resp.zone.maxLevel}`;
+        const baseLvl = `Niv. ${resp.zone.minLevel}–${resp.zone.maxLevel}${currentVillageLabel}`;
         const mult = typeof resp.respawnMultiplier === 'number' ? resp.respawnMultiplier : 1.0;
         const zCount = typeof resp.zonePlayerCount === 'number' ? resp.zonePlayerCount : 1;
         const multText = mult > 1.0 ? mult.toFixed(2).replace(/\.?0+$/, '') : '';
@@ -1023,7 +1053,6 @@ class SymfonyForeverGame {
         return;
       }
       if (ud.entityType === 'MONSTER' && ud.entityId) {
-        this.setTarget('MONSTER', ud.entityId);
         void this.performAutoAttack();
         return;
       }
@@ -1035,6 +1064,35 @@ class SymfonyForeverGame {
 
     // Left-click on open ground / empty space: always trigger auto-attack swing (even with no mob in range)
     void this.performAutoAttack();
+  }
+
+  private findNearestAliveMonster(maxDist = 65): { entry: MonsterEntry; dist: number } | null {
+    let bestEntry: MonsterEntry | null = null;
+    let bestDist = maxDist;
+    for (const entry of this.monsters.values()) {
+      if (entry.state.state === 'DEAD' || entry.state.hp <= 0) continue;
+      const dist = Math.hypot(entry.state.x - this.controller.x, entry.state.z - this.controller.z);
+      if (dist <= bestDist) {
+        bestDist = dist;
+        bestEntry = entry;
+      }
+    }
+    return bestEntry ? { entry: bestEntry, dist: bestDist } : null;
+  }
+
+  private autoTargetNearestMonster(maxDist = 65): { entry: MonsterEntry; dist: number } | null {
+    const nearest = this.findNearestAliveMonster(maxDist);
+    if (nearest) {
+      this.setTarget('MONSTER', nearest.entry.state.id);
+      return nearest;
+    }
+    if (this.targetType === 'MONSTER' && this.targetId !== null) {
+      const cur = this.monsters.get(this.targetId);
+      if (!cur || cur.state.state === 'DEAD' || cur.state.hp <= 0) {
+        this.clearTarget();
+      }
+    }
+    return null;
   }
 
   private cycleNearestMonster(): void {
@@ -1128,7 +1186,12 @@ class SymfonyForeverGame {
   }
 
   private async performAutoAttack(): Promise<void> {
-    if (!this.selfState || this.selfState.isDead || this.autoAttackInFlight) return;
+    if (!this.selfState || this.selfState.isDead) return;
+
+    // Player auto-attacks always automatically target the closest alive monster
+    const nearest = this.autoTargetNearestMonster();
+
+    if (this.autoAttackInFlight) return;
     const nowSec = performance.now() / 1000;
     const aaRem = Math.max(this.selfState.autoAttackCooldown ?? 0, this.localAaCooldownUntil - nowSec);
     if (aaRem > 0.08) return;
@@ -1136,34 +1199,7 @@ class SymfonyForeverGame {
     this.flashSkillButton('aa', 'press');
 
     const aaRange = this.classCode === 'HEAL' ? 18.0 : 8.5;
-    let inRangeTargetId: number | null = null;
-
-    if (this.targetType === 'MONSTER' && this.targetId !== null) {
-      const targeted = this.monsters.get(this.targetId);
-      if (targeted && targeted.state.state !== 'DEAD') {
-        const dist = Math.hypot(targeted.state.x - this.controller.x, targeted.state.z - this.controller.z);
-        if (dist <= aaRange) {
-          inRangeTargetId = targeted.state.id;
-        }
-      }
-    }
-
-    if (inRangeTargetId === null) {
-      let nearestId: number | null = null;
-      let nearestDist = aaRange;
-      for (const m of this.monsters.values()) {
-        if (m.state.state === 'DEAD') continue;
-        const dist = Math.hypot(m.state.x - this.controller.x, m.state.z - this.controller.z);
-        if (dist <= nearestDist) {
-          nearestDist = dist;
-          nearestId = m.state.id;
-        }
-      }
-      if (nearestId !== null) {
-        this.setTarget('MONSTER', nearestId);
-        inRangeTargetId = nearestId;
-      }
-    }
+    const inRangeTargetId = nearest && nearest.dist <= aaRange ? nearest.entry.state.id : null;
 
     // Empty-air swing when no monster is within auto-attack range (client-side animation + VFX + 1.2s timer)
     if (inRangeTargetId === null) {
@@ -1182,6 +1218,10 @@ class SymfonyForeverGame {
         this.flashSkillButton('aa', 'reject');
         if (res.error && res.error !== 'Auto-attaque en recharge.') this.showToast(res.error);
         return;
+      }
+
+      if (res.targetType === 'MONSTER' && typeof res.targetId === 'number') {
+        this.setTarget('MONSTER', res.targetId);
       }
 
       this.localAaCooldownUntil = performance.now() / 1000 + 1.2;
@@ -1232,16 +1272,30 @@ class SymfonyForeverGame {
       return;
     }
 
-    // Auto-pick nearest monster if enemy skill cast with no monster selected
-    if ((skill.targetType === 'ENEMY' || skill.targetType === 'ENEMY_AOE') && this.targetType !== 'MONSTER') {
-      this.cycleNearestMonster();
+    // Offensive skills always automatically target the nearest alive monster
+    const isEnemySkill = skill.targetType === 'ENEMY' || skill.targetType === 'ENEMY_AOE';
+    let castTargetType: string | null = this.targetType;
+    let castTargetId: number | null = this.targetId;
+    if (!this.selfState.isDead && (isEnemySkill || skill.targetType === 'SELF_AOE')) {
+      const nearest = this.autoTargetNearestMonster();
+      if (isEnemySkill) {
+        castTargetType = nearest ? 'MONSTER' : this.targetType === 'MONSTER' ? 'MONSTER' : null;
+        castTargetId = nearest ? nearest.entry.state.id : this.targetType === 'MONSTER' ? this.targetId : null;
+      } else {
+        castTargetType = this.targetType;
+        castTargetId = this.targetId;
+      }
     }
 
-    const res = await this.net.castSkill(this.characterId, skill.code, this.targetType, this.targetId);
+    const res = await this.net.castSkill(this.characterId, skill.code, castTargetType, castTargetId);
     if (!res.ok) {
       this.flashSkillButton(slot, 'reject');
       if (res.error) this.showToast(res.error);
       return;
+    }
+
+    if (res.targetType === 'MONSTER' && typeof res.targetId === 'number') {
+      this.setTarget('MONSTER', res.targetId);
     }
 
     // Confirmed cast: icon burst flash + auto-face target + skill-specific procedural bone animation!

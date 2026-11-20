@@ -230,13 +230,97 @@ final class WorldCatalog
     }
 
     /**
-     * Returns true when coordinates sit inside Saint-Gilles town hub or near any zone checkpoint/camp.
+     * Computes the number of Creole houses in a Réunion village proportionally to its population.
+     * Ranges monotonically from 3 houses (isolated cirque îlet ~800 hab.) up to 25 houses (Saint-Denis ~155,600 hab.).
+     */
+    public static function computeHouseCountForPopulation(int $population): int
+    {
+        return max(3, min(28, (int) round(1.8 + sqrt(max(0, $population) / 1000.0) * 1.85)));
+    }
+
+    /**
+     * All 26 towns & villages of La Réunion (all 24 communes + Mafate La Nouvelle & Piton des Neiges Caverne Dufour),
+     * linked to their geographic leveling zone and scaled in house count by population.
+     *
+     * @return list<array{
+     *   code: string,
+     *   name: string,
+     *   zoneCode: string,
+     *   x: float,
+     *   z: float,
+     *   population: int,
+     *   houses: int,
+     *   isZoneCamp: bool
+     * }>
+     */
+    public static function villages(): array
+    {
+        $defs = [
+            // Lagon de l'Ouest (Côte Ouest)
+            ['code' => 'saint_paul',       'name' => 'Saint-Paul · Saint-Gilles',   'zoneCode' => 'lagon_ouest',  'x' => self::scaleCoord(-585.0), 'z' => self::scaleCoord(-95.0),  'population' => 106200, 'isZoneCamp' => true],
+            ['code' => 'saint_leu',        'name' => 'Saint-Leu',                   'zoneCode' => 'lagon_ouest',  'x' => self::scaleCoord(-490.0), 'z' => self::scaleCoord(175.0),  'population' =>  35300, 'isZoneCamp' => false],
+            ['code' => 'le_port',          'name' => 'Le Port',                     'zoneCode' => 'lagon_ouest',  'x' => self::scaleCoord(-485.0), 'z' => self::scaleCoord(-315.0), 'population' =>  33300, 'isZoneCamp' => false],
+            ['code' => 'trois_bassins',    'name' => 'Trois-Bassins',               'zoneCode' => 'lagon_ouest',  'x' => self::scaleCoord(-515.0), 'z' => self::scaleCoord(55.0),   'population' =>   7000, 'isZoneCamp' => false],
+
+            // Cirque de Salazie & Côte Nord-Est / Est
+            ['code' => 'saint_andre',      'name' => 'Saint-André',                 'zoneCode' => 'salazie',      'x' => self::scaleCoord(290.0),  'z' => self::scaleCoord(-390.0), 'population' =>  57900, 'isZoneCamp' => false],
+            ['code' => 'saint_benoit',     'name' => 'Saint-Benoît',                'zoneCode' => 'salazie',      'x' => self::scaleCoord(450.0),  'z' => self::scaleCoord(-150.0), 'population' =>  37900, 'isZoneCamp' => false],
+            ['code' => 'sainte_marie',     'name' => 'Sainte-Marie',                'zoneCode' => 'salazie',      'x' => self::scaleCoord(25.0),   'z' => self::scaleCoord(-485.0), 'population' =>  35200, 'isZoneCamp' => false],
+            ['code' => 'sainte_suzanne',   'name' => 'Sainte-Suzanne',              'zoneCode' => 'salazie',      'x' => self::scaleCoord(165.0),  'z' => self::scaleCoord(-450.0), 'population' =>  24800, 'isZoneCamp' => false],
+            ['code' => 'bras_panon',       'name' => 'Bras-Panon',                  'zoneCode' => 'salazie',      'x' => self::scaleCoord(365.0),  'z' => self::scaleCoord(-275.0), 'population' =>  13200, 'isZoneCamp' => false],
+            ['code' => 'salazie',          'name' => 'Salazie (Hell-Bourg)',        'zoneCode' => 'salazie',      'x' => self::scaleCoord(95.0),   'z' => self::scaleCoord(-290.0), 'population' =>   7300, 'isZoneCamp' => true],
+
+            // Cirque de Mafate & Nord / Nord-Ouest
+            ['code' => 'saint_denis',      'name' => 'Saint-Denis',                 'zoneCode' => 'mafate',       'x' => self::scaleCoord(-140.0), 'z' => self::scaleCoord(-490.0), 'population' => 155600, 'isZoneCamp' => false],
+            ['code' => 'la_possession',    'name' => 'La Possession',               'zoneCode' => 'mafate',       'x' => self::scaleCoord(-385.0), 'z' => self::scaleCoord(-385.0), 'population' =>  36500, 'isZoneCamp' => false],
+            ['code' => 'mafate',           'name' => 'Mafate (La Nouvelle)',        'zoneCode' => 'mafate',       'x' => self::scaleCoord(-250.0), 'z' => self::scaleCoord(-240.0), 'population' =>    800, 'isZoneCamp' => true],
+
+            // Cirque de Cilaos & Hauts du Sud-Ouest
+            ['code' => 'le_tampon',        'name' => 'Le Tampon',                   'zoneCode' => 'cilaos',       'x' => self::scaleCoord(-45.0),  'z' => self::scaleCoord(295.0),  'population' =>  81900, 'isZoneCamp' => false],
+            ['code' => 'saint_louis',      'name' => 'Saint-Louis',                 'zoneCode' => 'cilaos',       'x' => self::scaleCoord(-290.0), 'z' => self::scaleCoord(355.0),  'population' =>  54400, 'isZoneCamp' => false],
+            ['code' => 'etang_sale',       'name' => 'L\'Étang-Salé',               'zoneCode' => 'cilaos',       'x' => self::scaleCoord(-395.0), 'z' => self::scaleCoord(335.0),  'population' =>  14300, 'isZoneCamp' => false],
+            ['code' => 'les_avirons',      'name' => 'Les Avirons',                 'zoneCode' => 'cilaos',       'x' => self::scaleCoord(-435.0), 'z' => self::scaleCoord(255.0),  'population' =>  11500, 'isZoneCamp' => false],
+            ['code' => 'entre_deux',       'name' => 'Entre-Deux',                  'zoneCode' => 'cilaos',       'x' => self::scaleCoord(-145.0), 'z' => self::scaleCoord(285.0),  'population' =>   7100, 'isZoneCamp' => false],
+            ['code' => 'cilaos',           'name' => 'Cilaos',                      'zoneCode' => 'cilaos',       'x' => self::scaleCoord(-130.0), 'z' => self::scaleCoord(145.0),  'population' =>   5500, 'isZoneCamp' => true],
+
+            // Sud Sauvage & Grand Sud
+            ['code' => 'saint_pierre',     'name' => 'Saint-Pierre',                'zoneCode' => 'sud_sauvage',  'x' => self::scaleCoord(-175.0), 'z' => self::scaleCoord(470.0),  'population' =>  85200, 'isZoneCamp' => false],
+            ['code' => 'saint_joseph',     'name' => 'Saint-Joseph',                'zoneCode' => 'sud_sauvage',  'x' => self::scaleCoord(95.0),   'z' => self::scaleCoord(540.0),  'population' =>  39200, 'isZoneCamp' => false],
+            ['code' => 'petite_ile',       'name' => 'Petite-Île',                  'zoneCode' => 'sud_sauvage',  'x' => self::scaleCoord(-35.0),  'z' => self::scaleCoord(515.0),  'population' =>  12900, 'isZoneCamp' => false],
+            ['code' => 'saint_philippe',   'name' => 'Saint-Philippe',              'zoneCode' => 'sud_sauvage',  'x' => self::scaleCoord(165.0),  'z' => self::scaleCoord(480.0),  'population' =>   5100, 'isZoneCamp' => true],
+
+            // Piton des Neiges
+            ['code' => 'caverne_dufour',   'name' => 'Caverne Dufour (Piton)',      'zoneCode' => 'piton_neiges', 'x' => -364.0,                   'z' => 70.0,                    'population' =>   1200, 'isZoneCamp' => true],
+
+            // Piton de la Fournaise & Plaine des Palmistes / Sainte-Rose
+            ['code' => 'plaine_palmistes', 'name' => 'La Plaine-des-Palmistes',     'zoneCode' => 'fournaise',    'x' => self::scaleCoord(255.0),  'z' => self::scaleCoord(210.0),  'population' =>   6900, 'isZoneCamp' => true],
+            ['code' => 'sainte_rose',      'name' => 'Sainte-Rose',                 'zoneCode' => 'fournaise',    'x' => self::scaleCoord(565.0),  'z' => self::scaleCoord(65.0),   'population' =>   6400, 'isZoneCamp' => false],
+        ];
+
+        return array_map(
+            static fn (array $v): array => [
+                ...$v,
+                'houses' => self::computeHouseCountForPopulation($v['population']),
+            ],
+            $defs,
+        );
+    }
+
+    /**
+     * Returns true when coordinates sit inside Saint-Gilles town hub, any Réunion village, or near any zone checkpoint/camp.
      */
     public static function isInSafeSanctuary(float $x, float $z): bool
     {
         foreach (self::zones() as $zone) {
             $radius = ($zone['isSafeHub'] ?? false) ? self::HUB_SAFE_RADIUS : self::CHECKPOINT_SAFE_RADIUS;
             if (hypot($x - $zone['respawnX'], $z - $zone['respawnZ']) <= $radius) {
+                return true;
+            }
+        }
+
+        foreach (self::villages() as $village) {
+            $radius = $village['code'] === 'saint_paul' ? self::HUB_SAFE_RADIUS : self::CHECKPOINT_SAFE_RADIUS;
+            if (hypot($x - $village['x'], $z - $village['z']) <= $radius) {
                 return true;
             }
         }

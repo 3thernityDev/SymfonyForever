@@ -91,6 +91,8 @@ export class NetworkClient {
     events?: SyncResponse['events'];
     xpGained?: number;
     leveledUp?: boolean;
+    targetType?: 'MONSTER' | 'PLAYER';
+    targetId?: number;
   }> {
     const res = await fetch('/api/combat/cast', {
       method: 'POST',
@@ -106,6 +108,8 @@ export class NetworkClient {
       events?: SyncResponse['events'];
       xpGained?: number;
       leveledUp?: boolean;
+      targetType?: 'MONSTER' | 'PLAYER';
+      targetId?: number;
     };
   }
 
@@ -122,6 +126,8 @@ export class NetworkClient {
     xpGained?: number;
     leveledUp?: boolean;
     resourceGain?: number;
+    targetType?: 'MONSTER' | 'PLAYER';
+    targetId?: number;
   }> {
     const res = await fetch('/api/combat/attack', {
       method: 'POST',
@@ -138,6 +144,8 @@ export class NetworkClient {
       xpGained?: number;
       leveledUp?: boolean;
       resourceGain?: number;
+      targetType?: 'MONSTER' | 'PLAYER';
+      targetId?: number;
     };
   }
 
