@@ -151,5 +151,42 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertSame(2, $upg['newRank']);
         self::assertSame(0, $upg['self']['skillPoints']);
         self::assertSame(2, $upg['self']['skillLevels']['shield_bash']);
+
+        // 8. Secret /iddad chat command grants +1,000,000 gold without broadcasting to chat
+        $em2->clear();
+        $cBefore = $em2->find(Character::class, $char->getId());
+        self::assertInstanceOf(Character::class, $cBefore);
+        $goldBefore = $cBefore->getGold();
+
+        $this->client->request('POST', '/api/chat/send', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char->getId(),
+            'channel' => 'PARTY',
+            'content' => '/iddad',
+        ]));
+        self::assertResponseIsSuccessful();
+        $cheat = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertTrue($cheat['ok']);
+        self::assertSame('iddad', $cheat['command']);
+        self::assertSame($goldBefore + 1_000_000, $cheat['self']['gold']);
+        self::assertSame($goldBefore + 1_000_000, $cheat['inventory']['gold']);
+
+        $em2->clear();
+        $cAfter = $em2->find(Character::class, $char->getId());
+        self::assertInstanceOf(Character::class, $cAfter);
+        self::assertSame($goldBefore + 1_000_000, $cAfter->getGold());
+
+        $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char->getId(),
+            'x' => $cAfter->getPosX(),
+            'z' => $cAfter->getPosZ(),
+            'rotY' => 0.0,
+            'isMoving' => false,
+            'lastEventId' => 0,
+            'lastChatId' => 0,
+        ]));
+        self::assertResponseIsSuccessful();
+        $sync3 = json_decode((string) $this->client->getResponse()->getContent(), true);
+        $contents = array_column($sync3['chat'], 'content');
+        self::assertNotContains('/iddad', $contents);
     }
 }

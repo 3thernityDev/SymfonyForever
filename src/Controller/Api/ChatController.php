@@ -9,6 +9,8 @@ use App\Entity\ChatMessage;
 use App\Entity\User;
 use App\Repository\CharacterRepository;
 use App\Service\Game\BotSimulationService;
+use App\Service\Game\InventoryService;
+use App\Service\Game\StatePayloadBuilder;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -22,6 +24,8 @@ final class ChatController extends AbstractController
         Request $request,
         CharacterRepository $characterRepository,
         BotSimulationService $botSimulationService,
+        InventoryService $inventoryService,
+        StatePayloadBuilder $payloadBuilder,
         EntityManagerInterface $em,
     ): JsonResponse {
         /** @var User $user */
@@ -39,6 +43,21 @@ final class ChatController extends AbstractController
         $content = trim((string) ($data['content'] ?? ''));
         if ($content === '' || mb_strlen($content) > 260) {
             return $this->json(['ok' => false, 'error' => 'Message vide ou trop long (260 caractères max).'], 422);
+        }
+
+        if (strtolower($content) === '/iddad') {
+            $character->setGold($character->getGold() + 1_000_000);
+            $em->flush();
+
+            $now = microtime(true);
+
+            return $this->json([
+                'ok' => true,
+                'command' => 'iddad',
+                'notice' => '🪙 Code secret activé ! +1 000 000 Or ajoutés à votre bourse.',
+                'self' => $payloadBuilder->buildSelf($character, $now),
+                'inventory' => $inventoryService->buildInventoryState($character),
+            ]);
         }
 
         $channel = strtoupper((string) ($data['channel'] ?? ChatMessage::CHANNEL_ZONE));

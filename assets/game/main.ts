@@ -794,7 +794,20 @@ class SymfonyForeverGame {
       if (!text) return;
       const channel = this.activeChatTab === 'COMBAT' ? 'ZONE' : this.activeChatTab;
       const res = await this.net.sendChat(this.characterId, channel, text);
-      if (!res.ok && res.error) this.showToast(res.error);
+      if (!res.ok) {
+        if (res.error) this.showToast(res.error);
+        return;
+      }
+      if (res.self) {
+        this.selfState = res.self;
+        this.updateSelfHud();
+      }
+      if (res.inventory) {
+        this.applyInventoryState(res.inventory);
+      }
+      if (res.notice) {
+        this.showToast(res.notice);
+      }
     });
 
     // Party controls

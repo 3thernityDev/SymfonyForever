@@ -257,14 +257,32 @@ export class NetworkClient {
     };
   }
 
-  public async sendChat(characterId: number, channel: string, content: string): Promise<{ ok: boolean; error?: string }> {
+  public async sendChat(
+    characterId: number,
+    channel: string,
+    content: string,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    command?: string;
+    notice?: string;
+    self?: SelfState;
+    inventory?: InventoryStatePayload;
+  }> {
     const res = await fetch('/api/chat/send', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ characterId, channel, content }),
     });
-    return (await res.json()) as { ok: boolean; error?: string };
+    return (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      command?: string;
+      notice?: string;
+      self?: SelfState;
+      inventory?: InventoryStatePayload;
+    };
   }
 
   public async partyAction(
