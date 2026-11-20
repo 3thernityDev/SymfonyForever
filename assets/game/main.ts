@@ -137,6 +137,7 @@ class SymfonyForeverGame {
 
   private lastEventId = 0;
   private lastChatId = 0;
+  private consecutiveSyncErrors = 0;
   private currentZoneCode = '';
   private targetType: 'MONSTER' | 'PLAYER' | null = null;
   private targetId: number | null = null;
@@ -415,9 +416,14 @@ class SymfonyForeverGame {
     if (outcome.status === 'error') {
       if (netDot) netDot.style.background = '#ef4444';
       if (netPing) netPing.textContent = 'Reconnexion...';
+      this.consecutiveSyncErrors++;
+      if (this.consecutiveSyncErrors === 3 || this.consecutiveSyncErrors % 20 === 0) {
+        this.showToast('⚠️ Erreur serveur lors de la synchronisation (vérifiez le schéma BDD / logs).');
+      }
       return;
     }
 
+    this.consecutiveSyncErrors = 0;
     if (netDot) netDot.style.background = this.net.lastPingMs < 220 ? '#22c55e' : '#facc15';
     if (netPing) netPing.textContent = `HTTP ${this.net.lastPingMs} ms`;
 

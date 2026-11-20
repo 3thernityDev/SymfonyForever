@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Entity\Character;
 use App\Entity\User;
 use App\Repository\CharacterRepository;
+use App\Repository\MonsterInstanceRepository;
 use App\Repository\ZoneRepository;
 use App\Service\Game\WorldSeederService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -20,6 +21,7 @@ final class GameViewController extends AbstractController
         int $id,
         CharacterRepository $characterRepository,
         ZoneRepository $zoneRepository,
+        MonsterInstanceRepository $monsterRepository,
         WorldSeederService $seeder,
     ): Response {
         /** @var User $user */
@@ -30,8 +32,8 @@ final class GameViewController extends AbstractController
             throw $this->createAccessDeniedException('Personnage introuvable ou non autorisé.');
         }
 
-        // Auto-seed world on first launch so the island is always populated!
-        if ($zoneRepository->count([]) === 0) {
+        // Auto-seed or upgrade world monsters on launch so the island is always populated!
+        if ($zoneRepository->count([]) === 0 || $monsterRepository->count([]) < WorldSeederService::MIN_DENSE_ISLAND_MONSTERS) {
             $seeder->seed();
         }
 
