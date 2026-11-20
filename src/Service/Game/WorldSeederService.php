@@ -18,6 +18,8 @@ use Doctrine\ORM\EntityManagerInterface;
 
 final class WorldSeederService
 {
+    public const int MIN_DENSE_ISLAND_MONSTERS = 900;
+
     private readonly NpcRegistry $npcRegistry;
 
     public function __construct(
@@ -182,8 +184,8 @@ final class WorldSeederService
                         ->setPosY($safe['y'])
                         ->setPosZ($safe['z']);
                 }
-            } elseif ($existingCount < 250 || $distinctTemplates < count($templates)) {
-                // Upgrade earlier sparse/old bestiary seed to full 1-60 island fauna while keeping human players in place
+            } elseif ($existingCount < self::MIN_DENSE_ISLAND_MONSTERS || $distinctTemplates < count($templates)) {
+                // Upgrade earlier sparse/old bestiary seed to dense 1-60 island packs while keeping human players in place
                 $resetMonsters = true;
                 if ($distinctTemplates < count($templates)) {
                     $this->em->createQuery('DELETE FROM App\Entity\Character c WHERE c.isBot = true')->execute();
@@ -262,7 +264,8 @@ final class WorldSeederService
                 ['seigneur_dolomieu', 'fournaise', 1540.0, 962.5],
             ];
 
-            $this->appendIslandWideSpawns($spawns);
+            $this->appendThemedBiomeCamps($spawns);
+            $this->appendIslandWideSpawns($spawns, $templates);
 
             foreach ($spawns as [$tplCode, $zoneCode, $sx, $sz]) {
                 $pos = $this->terrainService->findNearestWalkable($sx, $sz);
@@ -414,12 +417,85 @@ final class WorldSeederService
     }
 
     /**
-     * Distributes creatures across every walkable part of La Réunion (grid 210m with jitter)
-     * while preserving safe camp bubbles around Quest NPCs, respawn plazas, and the Dolomieu arena.
+     * Adds curated themed wildlife camps and hunting packs across all 7 biomes.
      *
      * @param list<array{string, string, float, float}> $spawns
      */
-    private function appendIslandWideSpawns(array &$spawns): void
+    private function appendThemedBiomeCamps(array &$spawns): void
+    {
+        $safeCenters = $this->buildSafeCenters();
+        $camps = [
+            // Lagon de l'Ouest (Niv 1-10)
+            ['crabe_recif', 'lagon_ouest', -1950.0, -240.0, 3, 18.0],
+            ['tangue_sauvage', 'lagon_ouest', -1870.0, -395.0, 3, 20.0],
+            ['guepe_cotiere', 'lagon_ouest', -1790.0, -265.0, 4, 22.0],
+            ['paille_en_queue', 'lagon_ouest', -1760.0, -140.0, 3, 24.0],
+            // Salazie (Niv 10-18)
+            ['sanglier_salazie', 'salazie', 250.0, -940.0, 4, 22.0],
+            ['zoizo_lunettes', 'salazie', 450.0, -1020.0, 4, 24.0],
+            ['tec_tec_foret', 'salazie', 180.0, -860.0, 3, 20.0],
+            ['papangue_feroce', 'salazie', 510.0, -1120.0, 2, 18.0],
+            // Mafate (Niv 18-27)
+            ['tuit_tuit', 'mafate', -980.0, -780.0, 4, 22.0],
+            ['golem_schiste', 'mafate', -820.0, -940.0, 3, 22.0],
+            ['bibe_mafate', 'mafate', -1030.0, -890.0, 3, 20.0],
+            ['gecko_bourbon', 'mafate', -760.0, -760.0, 3, 20.0],
+            // Cilaos (Niv 27-36)
+            ['cerf_java', 'cilaos', -540.0, 610.0, 4, 24.0],
+            ['oiseau_vert_cilaos', 'cilaos', -350.0, 430.0, 4, 22.0],
+            ['merle_peyi', 'cilaos', -560.0, 450.0, 3, 20.0],
+            ['gardien_cilaos', 'cilaos', -375.0, 610.0, 3, 22.0],
+            // Sud Sauvage (Niv 36-45)
+            ['gecko_manapany', 'sud_sauvage', 465.0, 1640.0, 4, 22.0],
+            ['tortue_bourbon', 'sud_sauvage', 595.0, 1785.0, 3, 22.0],
+            ['lezard_obsidienne', 'sud_sauvage', 685.0, 1795.0, 3, 22.0],
+            ['scolopendre_basalte', 'sud_sauvage', 765.0, 1735.0, 3, 24.0],
+            // Piton des Neiges (Niv 45-54)
+            ['petrel_barau', 'piton_neiges', -325.0, -85.0, 4, 24.0],
+            ['petrel_noir', 'piton_neiges', -160.0, -320.0, 4, 24.0],
+            ['papillon_salazie', 'piton_neiges', -410.0, -205.0, 3, 20.0],
+            ['colosse_nuages', 'piton_neiges', -262.5, -227.5, 2, 22.0],
+            // Piton de la Fournaise (Niv 53-60)
+            ['roussette_bourbon', 'fournaise', 990.0, 790.0, 4, 24.0],
+            ['molosse_magma', 'fournaise', 1180.0, 845.0, 4, 24.0],
+            ['ibis_reunion', 'fournaise', 1110.0, 745.0, 2, 20.0],
+            ['chouette_bourbon', 'fournaise', 1320.0, 935.0, 3, 22.0],
+        ];
+
+        foreach ($camps as $idx => [$tplCode, $zoneCode, $cx, $cz, $packSize, $ringRadius]) {
+            $center = $this->terrainService->findNearestWalkable($cx, $cz);
+            if ($this->isInsideSafeCenter($center['x'], $center['z'], $safeCenters)) {
+                continue;
+            }
+
+            $baseAngle = ($idx * 0.7);
+            for ($m = 0; $m < $packSize; ++$m) {
+                $ang = $baseAngle + ($m / max(1, $packSize)) * M_PI * 2.0;
+                $rad = $ringRadius * (0.65 + 0.35 * (($m % 2 === 0) ? 1.0 : 0.7));
+                $mx = $center['x'] + cos($ang) * $rad;
+                $mz = $center['z'] + sin($ang) * $rad;
+                if (!$this->terrainService->isWalkable($mx, $mz)) {
+                    continue;
+                }
+                if ($this->terrainService->getZoneCode($mx, $mz) !== $zoneCode) {
+                    continue;
+                }
+                if ($this->isInsideSafeCenter($mx, $mz, $safeCenters)) {
+                    continue;
+                }
+                $spawns[] = [$tplCode, $zoneCode, round($mx, 1), round($mz, 1)];
+            }
+        }
+    }
+
+    /**
+     * Distributes wildlife clearings and packs across every walkable part of La Réunion (~140m grid)
+     * while preserving safe camp bubbles around Quest NPCs, respawn plazas, and the Dolomieu arena.
+     *
+     * @param list<array{string, string, float, float}> $spawns
+     * @param array<string, MonsterTemplate>            $templates
+     */
+    private function appendIslandWideSpawns(array &$spawns, array $templates): void
     {
         $safeCenters = $this->buildSafeCenters();
         $zones = WorldCatalog::zones();
@@ -432,31 +508,46 @@ final class WorldSeederService
             return ($seed & 0x7FFFFFFF) / 2147483647.0;
         };
 
-        $step = 210.0;
+        // Spatial hash buckets for O(1) clearing spacing lookup
+        $bucketSize = 80.0;
+        $minClearingDist = 76.0;
+        $minClearingDistSq = $minClearingDist * $minClearingDist;
+        $buckets = [];
+        $registerBucket = static function (float $x, float $z) use (&$buckets, $bucketSize): void {
+            $bx = (int) floor($x / $bucketSize);
+            $bz = (int) floor($z / $bucketSize);
+            $buckets[$bx.':'.$bz][] = [$x, $z];
+        };
+        foreach ($spawns as [, , $ex, $ez]) {
+            $registerBucket($ex, $ez);
+        }
+
+        $step = 140.0;
         for ($gz = -3350.0; $gz <= 3350.0; $gz += $step) {
             for ($gx = -3350.0; $gx <= 3350.0; $gx += $step) {
-                $cx = $gx + ($nextRand() - 0.5) * 150.0;
-                $cz = $gz + ($nextRand() - 0.5) * 150.0;
+                $cx = $gx + ($nextRand() - 0.5) * 92.0;
+                $cz = $gz + ($nextRand() - 0.5) * 92.0;
 
                 if (!$this->terrainService->isWalkable($cx, $cz)) {
                     continue;
                 }
-
-                $tooClose = false;
-                foreach ($safeCenters as [$sx, $sz, $minR]) {
-                    if (hypot($cx - $sx, $cz - $sz) < $minR) {
-                        $tooClose = true;
-                        break;
-                    }
-                }
-                if ($tooClose) {
+                if ($this->isInsideSafeCenter($cx, $cz, $safeCenters)) {
                     continue;
                 }
 
-                foreach ($spawns as [, , $ex, $ez]) {
-                    if (hypot($cx - $ex, $cz - $ez) < 68.0) {
-                        $tooClose = true;
-                        break;
+                $bx = (int) floor($cx / $bucketSize);
+                $bz = (int) floor($cz / $bucketSize);
+                $tooClose = false;
+                for ($ox = -1; $ox <= 1 && !$tooClose; ++$ox) {
+                    for ($oz = -1; $oz <= 1; ++$oz) {
+                        foreach ($buckets[($bx + $ox).':'.($bz + $oz)] ?? [] as [$ex, $ez]) {
+                            $dx = $cx - $ex;
+                            $dz = $cz - $ez;
+                            if (($dx * $dx + $dz * $dz) < $minClearingDistSq) {
+                                $tooClose = true;
+                                break 2;
+                            }
+                        }
                     }
                 }
                 if ($tooClose) {
@@ -527,6 +618,31 @@ final class WorldSeederService
                 };
 
                 $spawns[] = [$tplCode, $zoneCode, round($cx, 1), round($cz, 1)];
+                $registerBucket($cx, $cz);
+
+                // Populate organic packs in clearings (2-3 social compatriots, or 30% paired non-boss solitary mobs)
+                $tpl = $templates[$tplCode] ?? null;
+                if ($tpl === null || $tpl->isBoss() || $tpl->isWorldBoss()) {
+                    continue;
+                }
+                $extraCount = $tpl->isSocial()
+                    ? ($nextRand() < 0.45 ? 2 : 1)
+                    : ($nextRand() < 0.30 ? 1 : 0);
+
+                $baseAng = $nextRand() * M_PI * 2.0;
+                for ($p = 0; $p < $extraCount; ++$p) {
+                    $ang = $baseAng + ($p * 2.1) + ($nextRand() - 0.5) * 0.6;
+                    $rad = 16.0 + $nextRand() * 12.0;
+                    $px = $cx + cos($ang) * $rad;
+                    $pz = $cz + sin($ang) * $rad;
+                    if (
+                        $this->terrainService->isWalkable($px, $pz)
+                        && $this->terrainService->getZoneCode($px, $pz) === $zoneCode
+                        && !$this->isInsideSafeCenter($px, $pz, $safeCenters)
+                    ) {
+                        $spawns[] = [$tplCode, $zoneCode, round($px, 1), round($pz, 1)];
+                    }
+                }
             }
         }
     }

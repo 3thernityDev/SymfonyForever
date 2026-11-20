@@ -84,12 +84,17 @@ final class WorldCoverageAndAoiTest extends KernelTestCase
     public function testMonstersPopulateAllSevenZonesAcrossTheEntireIsland(): void
     {
         $summary = $this->seeder->seed();
-        self::assertGreaterThanOrEqual(350, $summary['monsters'], 'L\'île entière doit être peuplée de monstres (>= 350).');
+        self::assertGreaterThanOrEqual(
+            WorldSeederService::MIN_DENSE_ISLAND_MONSTERS,
+            $summary['monsters'],
+            'L\'île entière doit être densément peuplée de camps et meutes de monstres (>= 900).',
+        );
 
         $all = $this->monsterRepo->findAll();
         self::assertCount($summary['monsters'], $all);
 
         $countsByZone = [];
+        $byTemplate = [];
         $minX = INF;
         $maxX = -INF;
         $minZ = INF;
@@ -99,6 +104,7 @@ final class WorldCoverageAndAoiTest extends KernelTestCase
         foreach ($all as $m) {
             $z = $m->getZoneCode();
             $countsByZone[$z] = ($countsByZone[$z] ?? 0) + 1;
+            $byTemplate[$m->getTemplate()->getCode()][] = $m;
             $minX = min($minX, $m->getPosX());
             $maxX = max($maxX, $m->getPosX());
             $minZ = min($minZ, $m->getPosZ());
@@ -112,11 +118,34 @@ final class WorldCoverageAndAoiTest extends KernelTestCase
         foreach (array_keys(WorldCatalog::zones()) as $zoneCode) {
             self::assertArrayHasKey($zoneCode, $countsByZone);
             self::assertGreaterThanOrEqual(
-                20,
+                45,
                 $countsByZone[$zoneCode],
-                sprintf('La zone %s doit contenir au moins 20 monstres répartis sur son territoire.', $zoneCode),
+                sprintf('La zone %s doit contenir au moins 45 monstres répartis sur son territoire.', $zoneCode),
             );
         }
+
+        // Verify organic same-species pack clusters (pairs/groups within 35m)
+        $packMembersCount = 0;
+        foreach ($byTemplate as $group) {
+            $n = count($group);
+            for ($i = 0; $i < $n; ++$i) {
+                $a = $group[$i];
+                for ($j = 0; $j < $n; ++$j) {
+                    if ($i === $j) {
+                        continue;
+                    }
+                    $b = $group[$j];
+                    if (
+                        $a->getZoneCode() === $b->getZoneCode()
+                        && hypot($a->getSpawnX() - $b->getSpawnX(), $a->getSpawnZ() - $b->getSpawnZ()) <= 35.0
+                    ) {
+                        ++$packMembersCount;
+                        break;
+                    }
+                }
+            }
+        }
+        self::assertGreaterThanOrEqual(25, (int) ($packMembersCount / 2), 'La carte doit comporter au moins 25 meutes/camps distincts.');
 
         self::assertGreaterThanOrEqual(3500.0, $maxX - $minX, 'Les monstres doivent couvrir l\'île d\'Ouest en Est.');
         self::assertGreaterThanOrEqual(2400.0, $maxZ - $minZ, 'Les monstres doivent couvrir l\'île du Nord au Sud.');
