@@ -32,6 +32,9 @@ final class BotSimulationService
     public const float BOT_TICK_INTERVAL = 1.0;
     public const float BOT_MOVE_SPEED = 9.5;
     public const float SPONTANEOUS_CHAT_MIN_GAP = 32.0;
+    public const float CHAT_REPLY_DELAY_MIN = 1.5;
+    public const float CHAT_REPLY_DELAY_AVG = 2.3;
+    public const float CHAT_REPLY_DELAY_MAX = 3.4;
     public const string BOT_OWNER_USERNAME = '__reunion_bots__';
 
     public function __construct(
@@ -69,6 +72,7 @@ final class BotSimulationService
             $this->purgeDeadBots();
 
             $aliveBots = $this->characterRepository->findAliveBots();
+            $deliveredReplies = $this->deliverDuePendingReplies($aliveBots, $now);
             $onlineHumans = $this->characterRepository->countOnlineHumans($now);
             $desiredBots = max(0, self::TARGET_ONLINE_PLAYERS - $onlineHumans);
 
@@ -78,6 +82,12 @@ final class BotSimulationService
             }
 
             if ($aliveBots !== [] && count($aliveBots) >= $desiredBots && ($now - $latestSeen) < self::BOT_TICK_INTERVAL) {
+                if ($deliveredReplies > 0) {
+                    $this->em->flush();
+
+                    return true;
+                }
+
                 return false;
             }
 
@@ -182,9 +192,26 @@ final class BotSimulationService
     }
 
     /**
-     * Generates a contextual French reply from an online bot when a human player writes in chat.
+     * Computes a human-like typing & reaction delay averaging ~2.3 seconds.
      */
-    public function onPlayerChatMessage(Character $sender, ChatMessage $message, ?float $now = null): ?ChatMessage
+    public static function computeReplyDelay(string $replyText): float
+    {
+        $typing = min(1.1, mb_strlen($replyText) * 0.017);
+        $jitter = mt_rand(-350, 350) / 1000.0;
+
+        return round(
+            max(self::CHAT_REPLY_DELAY_MIN, min(self::CHAT_REPLY_DELAY_MAX, 1.45 + $typing + $jitter)),
+            3,
+        );
+    }
+
+    /**
+     * Schedules a contextual French reply from an online bot with a natural delay (~2.3s average)
+     * instead of replying instantaneously on the same HTTP request.
+     *
+     * @return array{botName: string, channel: string, content: string, deliverAt: float, delay: float}|null
+     */
+    public function onPlayerChatMessage(Character $sender, ChatMessage $message, ?float $now = null): ?array
     {
         $now ??= microtime(true);
 
@@ -261,24 +288,98 @@ final class BotSimulationService
             return null;
         }
 
-        $replyMsg = new ChatMessage(
-            $channel,
-            $chosenBot->getName(),
-            $chosenBot->getClassCode(),
-            $replyText,
-            $channel === ChatMessage::CHANNEL_ZONE ? $sender->getZoneCode() : null,
-            $channel === ChatMessage::CHANNEL_PARTY ? $sender->getParty()?->getId() : null,
-        );
+        $delay = self::computeReplyDelay($replyText);
+        $deliverAt = round($now + $delay, 3);
 
         $state = $chosenBot->getBotState();
+        $pending = is_array($state['pendingReplies'] ?? null) ? $state['pendingReplies'] : [];
+        $pending[] = [
+            'deliverAt' => $deliverAt,
+            'channel' => $channel,
+            'zoneCode' => $channel === ChatMessage::CHANNEL_ZONE ? $sender->getZoneCode() : null,
+            'partyId' => $channel === ChatMessage::CHANNEL_PARTY ? $sender->getParty()?->getId() : null,
+            'content' => $replyText,
+        ];
+        if (count($pending) > 5) {
+            $pending = array_slice($pending, -5);
+        }
+
+        $state['pendingReplies'] = $pending;
         $state['lastReplyAt'] = $now;
         $state['nextChatAt'] = max((float) ($state['nextChatAt'] ?? 0.0), $now + 35.0);
         $chosenBot->setBotState($state);
 
-        $this->em->persist($replyMsg);
         $this->em->flush();
 
-        return $replyMsg;
+        return [
+            'botName' => $chosenBot->getName(),
+            'channel' => $channel,
+            'content' => $replyText,
+            'deliverAt' => $deliverAt,
+            'delay' => $delay,
+        ];
+    }
+
+    /**
+     * Posts any queued bot chat replies whose natural typing delay has elapsed.
+     *
+     * @param list<Character> $aliveBots
+     */
+    private function deliverDuePendingReplies(array $aliveBots, float $now): int
+    {
+        $delivered = 0;
+
+        foreach ($aliveBots as $bot) {
+            $state = $bot->getBotState();
+            $pending = $state['pendingReplies'] ?? null;
+            if (!is_array($pending) || $pending === []) {
+                continue;
+            }
+
+            $remaining = [];
+            foreach ($pending as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $deliverAt = (float) ($entry['deliverAt'] ?? 0.0);
+                if ($deliverAt > $now) {
+                    $remaining[] = $entry;
+                    continue;
+                }
+
+                $channel = (string) ($entry['channel'] ?? ChatMessage::CHANNEL_ZONE);
+                $zoneCode = isset($entry['zoneCode']) && is_string($entry['zoneCode']) ? $entry['zoneCode'] : null;
+                $partyId = isset($entry['partyId']) ? (int) $entry['partyId'] : null;
+                $content = trim((string) ($entry['content'] ?? ''));
+
+                if ($content === '') {
+                    continue;
+                }
+                if ($channel === ChatMessage::CHANNEL_PARTY && ($partyId === null || $bot->getParty()?->getId() !== $partyId)) {
+                    continue;
+                }
+
+                $replyMsg = new ChatMessage(
+                    $channel,
+                    $bot->getName(),
+                    $bot->getClassCode(),
+                    $content,
+                    $channel === ChatMessage::CHANNEL_ZONE ? $zoneCode : null,
+                    $channel === ChatMessage::CHANNEL_PARTY ? $partyId : null,
+                );
+                $this->em->persist($replyMsg);
+                ++$delivered;
+            }
+
+            if ($remaining !== []) {
+                $state['pendingReplies'] = array_values($remaining);
+            } else {
+                unset($state['pendingReplies']);
+            }
+            $bot->setBotState($state);
+        }
+
+        return $delivered;
     }
 
     /**

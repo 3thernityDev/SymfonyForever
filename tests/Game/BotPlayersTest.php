@@ -152,6 +152,19 @@ final class BotPlayersTest extends KernelTestCase
 
     public function testBotRepliesInFrenchToPlayerChatWithoutBotLoops(): void
     {
+        // 1. Reply delay averages ~2.3 seconds and stays bounded in [1.5s, 3.4s]
+        $delays = [];
+        $sampleText = 'Oté salut ! La forme ? Paré pou la chasse zordi !';
+        for ($i = 0; $i < 40; ++$i) {
+            $d = BotSimulationService::computeReplyDelay($sampleText);
+            self::assertGreaterThanOrEqual(BotSimulationService::CHAT_REPLY_DELAY_MIN, $d);
+            self::assertLessThanOrEqual(BotSimulationService::CHAT_REPLY_DELAY_MAX, $d);
+            $delays[] = $d;
+        }
+        $avgDelay = array_sum($delays) / count($delays);
+        self::assertGreaterThanOrEqual(1.9, $avgDelay);
+        self::assertLessThanOrEqual(2.7, $avgDelay);
+
         $now = 3000.0;
         $lagon = WorldCatalog::zones()['lagon_ouest'];
         $human = $this->createHuman('Bavard974', CharacterClass::HEAL, 'lagon_ouest', $lagon['respawnX'], $lagon['respawnZ'], $now);
@@ -159,28 +172,58 @@ final class BotPlayersTest extends KernelTestCase
 
         $this->botSim->tick('lagon_ouest', $now, false);
 
+        // 2. Player GLOBAL message schedules a delayed bot reply (must NOT be posted instantaneously)
         $globalMsg = new ChatMessage(ChatMessage::CHANNEL_GLOBAL, $human->getName(), $human->getClassCode(), 'Salut tout le monde !');
         $this->em->persist($globalMsg);
         $this->em->flush();
 
-        $globalReply = $this->botSim->onPlayerChatMessage($human, $globalMsg, $now + 0.2);
-        self::assertInstanceOf(ChatMessage::class, $globalReply);
-        self::assertSame(ChatMessage::CHANNEL_GLOBAL, $globalReply->getChannel());
-        self::assertNotSame($human->getName(), $globalReply->getSenderName());
+        $scheduledGlobal = $this->botSim->onPlayerChatMessage($human, $globalMsg, $now + 0.2);
+        self::assertIsArray($scheduledGlobal);
+        self::assertSame(ChatMessage::CHANNEL_GLOBAL, $scheduledGlobal['channel']);
+        self::assertNotSame($human->getName(), $scheduledGlobal['botName']);
+        self::assertGreaterThanOrEqual(BotSimulationService::CHAT_REPLY_DELAY_MIN, $scheduledGlobal['delay']);
+        self::assertGreaterThan($now + 1.5, $scheduledGlobal['deliverAt']);
 
+        // Immediately & at +1.0s (before deliverAt): reply must NOT be visible in chat yet
+        $earlyMsgs = $this->chatRepo->findVisibleSince('lagon_ouest', null, (int) $globalMsg->getId());
+        self::assertCount(0, $earlyMsgs, 'Le bot ne doit pas répondre instantanément.');
+
+        $this->botSim->tick('lagon_ouest', $now + 1.0, false);
+        $stillEarly = $this->chatRepo->findVisibleSince('lagon_ouest', null, (int) $globalMsg->getId());
+        self::assertCount(0, $stillEarly, 'La réponse du bot ne doit pas partir avant la fin du délai.');
+
+        // After deliverAt passes, tick delivers the queued reply (even inside 1.0s bot tick throttle!)
+        $delivered = $this->botSim->tick('lagon_ouest', $scheduledGlobal['deliverAt'] + 0.05, false);
+        self::assertTrue($delivered);
+        $afterGlobal = $this->chatRepo->findVisibleSince('lagon_ouest', null, (int) $globalMsg->getId());
+        self::assertCount(1, $afterGlobal);
+        $globalReply = $afterGlobal[0];
+        self::assertSame(ChatMessage::CHANNEL_GLOBAL, $globalReply->getChannel());
+        self::assertSame($scheduledGlobal['botName'], $globalReply->getSenderName());
+        self::assertSame($scheduledGlobal['content'], $globalReply->getContent());
+
+        // 3. Player ZONE message also uses delayed delivery
+        $tZone = $scheduledGlobal['deliverAt'] + 0.2;
         $zoneMsg = new ChatMessage(ChatMessage::CHANNEL_ZONE, $human->getName(), $human->getClassCode(), 'Coucou ça va par ici ?', 'lagon_ouest');
         $this->em->persist($zoneMsg);
         $this->em->flush();
 
-        $zoneReply = $this->botSim->onPlayerChatMessage($human, $zoneMsg, $now + 0.5);
-        self::assertInstanceOf(ChatMessage::class, $zoneReply);
-        self::assertSame(ChatMessage::CHANNEL_ZONE, $zoneReply->getChannel());
+        $scheduledZone = $this->botSim->onPlayerChatMessage($human, $zoneMsg, $tZone);
+        self::assertIsArray($scheduledZone);
+        self::assertSame(ChatMessage::CHANNEL_ZONE, $scheduledZone['channel']);
+        self::assertCount(0, $this->chatRepo->findVisibleSince('lagon_ouest', null, (int) $zoneMsg->getId()));
 
-        // Loop prevention: a bot message must NEVER trigger another bot reply
+        $this->botSim->tick('lagon_ouest', $scheduledZone['deliverAt'] + 0.05, false);
+        $afterZone = $this->chatRepo->findVisibleSince('lagon_ouest', null, (int) $zoneMsg->getId());
+        self::assertCount(1, $afterZone);
+        self::assertSame(ChatMessage::CHANNEL_ZONE, $afterZone[0]->getChannel());
+        self::assertSame($scheduledZone['content'], $afterZone[0]->getContent());
+
+        // 4. Loop prevention: a bot message must NEVER trigger another bot reply
         $botChar = $this->charRepo->findOneByNameInsensitive($globalReply->getSenderName());
         self::assertInstanceOf(Character::class, $botChar);
         self::assertTrue($botChar->isBot());
-        self::assertNull($this->botSim->onPlayerChatMessage($botChar, $globalReply, $now + 1.0));
+        self::assertNull($this->botSim->onPlayerChatMessage($botChar, $globalReply, $scheduledZone['deliverAt'] + 1.0));
     }
 
     public function testBotFightsKillsMonsterAndLevelsUpAutomatically(): void
