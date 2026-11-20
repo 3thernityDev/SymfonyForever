@@ -281,7 +281,9 @@ final class CombatService
         $wasIdle = $monster->getState() === MonsterInstance::STATE_IDLE;
         $finalDamage = max(1, (int) round($damage));
         $monster->setCurrentHp($monster->getCurrentHp() - $finalDamage);
-        $monster->setState(MonsterInstance::STATE_COMBAT);
+        if ($monster->getState() !== MonsterInstance::STATE_FLEEING) {
+            $monster->setState(MonsterInstance::STATE_COMBAT);
+        }
 
         $threatGain = $finalDamage * $cls->threatMultiplier();
         $monster->addThreat((int) $caster->getId(), $threatGain);
@@ -356,6 +358,8 @@ final class CombatService
         $monster->setTauntExpiresAt(0.0);
         $monster->setPhase(1);
         $monster->setLastSpecialAt(0.0);
+        $monster->setHelpTargetMonsterId(null);
+        $monster->setHasCalledHelp(false);
         $zonePlayerCount = $this->characterRepository->countOnlineInZone($monster->getZoneCode(), $now);
         if (
             $killer !== null
@@ -580,7 +584,9 @@ final class CombatService
         $wasIdle = $monster->getState() === MonsterInstance::STATE_IDLE;
         $finalDamage = max(1, (int) round($damage));
         $monster->setCurrentHp($monster->getCurrentHp() - $finalDamage);
-        $monster->setState(MonsterInstance::STATE_COMBAT);
+        if ($monster->getState() !== MonsterInstance::STATE_FLEEING) {
+            $monster->setState(MonsterInstance::STATE_COMBAT);
+        }
 
         // Threat calculation (Tank passive x2.2 * skill threat multiplier)
         $threatGain = $finalDamage * $caster->getCharacterClass()->threatMultiplier() * $skill->threatMultiplier;
@@ -602,6 +608,10 @@ final class CombatService
             $tauntDuration = $skill->effectDuration + ($rank - 1) * 0.5;
             $monster->setTauntedByCharacterId((int) $caster->getId());
             $monster->setTauntExpiresAt($now + $tauntDuration);
+            if ($monster->getState() === MonsterInstance::STATE_FLEEING) {
+                $monster->setState(MonsterInstance::STATE_COMBAT);
+                $monster->setHelpTargetMonsterId(null);
+            }
 
             $tauntEv = new CombatEvent(
                 $monster->getZoneCode(),
@@ -721,7 +731,7 @@ final class CombatService
         if ($effectiveHeal > 0 || $amount > 0) {
             $engaged = $this->monsterRepository->findAliveInRadius($ally->getPosX(), $ally->getPosZ(), 45.0);
             foreach ($engaged as $m) {
-                if ($m->getState() === MonsterInstance::STATE_COMBAT) {
+                if ($m->getState() === MonsterInstance::STATE_COMBAT || $m->getState() === MonsterInstance::STATE_FLEEING) {
                     if ($effectiveHeal > 0) {
                         $m->addThreat((int) $caster->getId(), $effectiveHeal * $skill->threatMultiplier * $caster->getCharacterClass()->threatMultiplier());
                     }

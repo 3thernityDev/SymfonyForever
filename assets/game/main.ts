@@ -296,7 +296,9 @@ class SymfonyForeverGame {
         }
         entry.visual.group.position.lerp(entry.targetPos, Math.min(1, dt * 6.5));
         entry.visual.group.rotation.y = this.lerpAngle(entry.visual.group.rotation.y, entry.state.rotY, Math.min(1, dt * 7));
-        entry.visual.body.position.y = Math.sin(elapsed * (entry.state.state === 'COMBAT' ? 9 : 2.5) + id) * 0.12;
+        const bobFreq = entry.state.state === 'FLEEING' ? 14 : entry.state.state === 'COMBAT' ? 9 : 2.5;
+        const bobAmp = entry.state.state === 'FLEEING' ? 0.18 : 0.12;
+        entry.visual.body.position.y = Math.sin(elapsed * bobFreq + id) * bobAmp;
         if (entry.visual.orbitGroup) {
           const speedMult = (entry.state.phase ?? 1) >= 2 ? 2.4 : 1.1;
           entry.visual.orbitGroup.rotation.y += dt * speedMult;
@@ -491,6 +493,16 @@ class SymfonyForeverGame {
         entry.state = m;
         entry.targetPos.set(m.x, m.y, m.z);
       }
+      const npLabel = entry.nameplate.querySelector('.np-label') as HTMLElement | null;
+      if (npLabel) {
+        if (m.state === 'FLEEING') {
+          npLabel.textContent = `🏃 ${m.name} (N.${m.level}) · À l'aide !`;
+          npLabel.style.color = '#fbbf24';
+        } else {
+          npLabel.textContent = `${m.name} (N.${m.level})`;
+          npLabel.style.color = m.isBoss ? '#fde047' : m.aggressive ? '#fca5a5' : '#fef9c3';
+        }
+      }
     }
     for (const [id, entry] of this.monsters) {
       if (!seenMonsters.has(id)) {
@@ -574,6 +586,11 @@ class SymfonyForeverGame {
       line = `<span style="color:#fde047">${this.esc(ev.sourceName)} provoque ${this.esc(ev.targetName)} !</span>`;
     } else if (ev.eventType === 'KILL') {
       line = `<span style="color:#c084fc">${this.esc(ev.targetName)} vaincu ! (+${ev.amount} XP)</span>`;
+    } else if (ev.eventType === 'FLEE') {
+      line = `<span style="color:#fbbf24">🏃 ${this.esc(ev.sourceName)} fuit chercher l'aide de ${this.esc(ev.targetName)} !</span>`;
+    } else if (ev.eventType === 'CALL_HELP') {
+      const plural = ev.amount > 1 ? ` (+${ev.amount} renforts)` : '';
+      line = `<span style="color:#fb923c">⚠️ ${this.esc(ev.sourceName)} rallie ${this.esc(ev.targetName)}${plural} au combat !</span>`;
     } else if (ev.eventType === 'DEATH') {
       line = `<span style="color:#f87171">💀 ${this.esc(ev.targetName)} est tombé au combat !</span>`;
     } else if (ev.eventType === 'LEVEL_UP') {
@@ -1472,13 +1489,17 @@ class SymfonyForeverGame {
       if (hpFill) hpFill.style.width = `${(m.hp / Math.max(1, m.maxHp)) * 100}%`;
       if (hpText) hpText.textContent = `${m.hp} / ${m.maxHp}`;
       if (aggroEl) {
-        if (m.targetCharacterId === this.characterId) {
-          aggroEl.textContent = '⚔️ Vous avez l\'aggro !';
+        const socialSuffix = m.social ? ' · 🐾 Social' : '';
+        if (m.state === 'FLEEING') {
+          aggroEl.textContent = `🏃 Fuit chercher de l'aide !${socialSuffix}`;
+        } else if (m.targetCharacterId === this.characterId) {
+          aggroEl.textContent = `⚔️ Vous avez l'aggro !${socialSuffix}`;
         } else if (m.targetCharacterId !== null) {
           const holder = this.remotePlayers.get(m.targetCharacterId)?.state.name ?? `Joueur #${m.targetCharacterId}`;
-          aggroEl.textContent = `🛡️ Aggro sur : ${holder}`;
+          aggroEl.textContent = `🛡️ Aggro sur : ${holder}${socialSuffix}`;
         } else {
-          aggroEl.textContent = m.aggressive ? '⚠️ Hostile' : 'Pacifique jusqu\'à attaque';
+          const baseAggro = m.aggressive ? '⚠️ Hostile' : 'Pacifique jusqu\'à attaque';
+          aggroEl.textContent = `${baseAggro}${socialSuffix}`;
         }
       }
       return;

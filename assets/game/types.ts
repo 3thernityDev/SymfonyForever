@@ -297,7 +297,7 @@ export interface MonsterState {
   level: number;
   hp: number;
   maxHp: number;
-  state: 'IDLE' | 'COMBAT' | 'RETURNING' | 'DEAD';
+  state: 'IDLE' | 'COMBAT' | 'FLEEING' | 'RETURNING' | 'DEAD';
   zoneCode: string;
   x: number;
   y: number;
@@ -313,6 +313,9 @@ export interface MonsterState {
   carapaceActive?: boolean;
   respawnRemaining?: number;
   aggressive: boolean;
+  social?: boolean;
+  fleeHpRatio?: number;
+  hasCalledHelp?: boolean;
   targetCharacterId: number | null;
   effects: ActiveEffectView[];
 }

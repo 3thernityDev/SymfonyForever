@@ -354,4 +354,64 @@ final class WorldCoverageAndAoiTest extends KernelTestCase
         $atkMethod->invokeArgs($sim, [$lv60AttackTarget, $dps10, $t + 3.0, &$events]);
         self::assertTrue($dps10->isDead(), 'Un joueur Niv. 10 doit être vaincu en 2 coups maximum par un mob Niv. 60.');
     }
+
+    public function testSocialSpeciesAreConfiguredAndPairedWithNearbyCompatriots(): void
+    {
+        $summary1 = $this->seeder->seed();
+        $c = self::getContainer();
+        $tplRepo = $c->get(MonsterTemplateRepository::class);
+
+        $expectedSocial = ['guepe_cotiere', 'zoizo_lunettes', 'sanglier_salazie', 'cerf_java', 'roussette_bourbon', 'molosse_magma'];
+        foreach ($expectedSocial as $code) {
+            $tpl = $tplRepo->findOneByCode($code);
+            self::assertNotNull($tpl, sprintf('Template %s introuvable.', $code));
+            self::assertTrue($tpl->isSocial(), sprintf('%s doit être configuré comme espèce sociale.', $code));
+            self::assertGreaterThan(0.0, $tpl->getFleeHpRatio());
+            self::assertLessThan(1.0, $tpl->getFleeHpRatio());
+            self::assertGreaterThan(0.0, $tpl->getCallHelpRadius());
+        }
+
+        $expectedSolitary = ['crabe_recif', 'endormi_bourbon', 'ibis_reunion', 'seigneur_dolomieu'];
+        foreach ($expectedSolitary as $code) {
+            $tpl = $tplRepo->findOneByCode($code);
+            self::assertNotNull($tpl, sprintf('Template %s introuvable.', $code));
+            self::assertFalse($tpl->isSocial(), sprintf('%s doit rester solitaire.', $code));
+        }
+
+        $all = $this->monsterRepo->findAll();
+        $byTemplate = [];
+        foreach ($all as $inst) {
+            $byTemplate[$inst->getTemplate()->getCode()][] = $inst;
+        }
+
+        foreach ($tplRepo->findAll() as $tpl) {
+            if (!$tpl->isSocial()) {
+                continue;
+            }
+            $group = $byTemplate[$tpl->getCode()] ?? [];
+            self::assertNotEmpty($group);
+            $radius = $tpl->getCallHelpRadius();
+            foreach ($group as $inst) {
+                $hasNearby = false;
+                foreach ($group as $other) {
+                    if ($other === $inst || $other->getZoneCode() !== $inst->getZoneCode()) {
+                        continue;
+                    }
+                    if (hypot($other->getSpawnX() - $inst->getSpawnX(), $other->getSpawnZ() - $inst->getSpawnZ()) <= $radius) {
+                        $hasNearby = true;
+                        break;
+                    }
+                }
+                self::assertTrue(
+                    $hasNearby,
+                    sprintf('L\'espèce sociale %s (#%d) doit avoir un compatriote à portée (<= %.1fm).', $tpl->getCode(), $inst->getId(), $radius),
+                );
+            }
+        }
+
+        // Calling seed() a second time must be strictly idempotent (zero extra mobs)
+        $summary2 = $this->seeder->seed();
+        self::assertSame($summary1['monsters'], $summary2['monsters']);
+        self::assertCount($summary1['monsters'], $this->monsterRepo->findAll());
+    }
 }

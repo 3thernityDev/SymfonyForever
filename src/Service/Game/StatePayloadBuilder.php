@@ -184,6 +184,9 @@ final class StatePayloadBuilder
             'carapaceActive' => $isWorldBoss && $activeEngaged < WorldSimulationService::WORLD_BOSS_MIN_PLAYERS_NO_REGEN,
             'respawnRemaining' => $m->getState() === MonsterInstance::STATE_DEAD ? round(max(0.0, $m->getRespawnAt() - $now), 1) : 0.0,
             'aggressive' => $tpl->isAggressive(),
+            'social' => $tpl->isSocial(),
+            'fleeHpRatio' => $tpl->getFleeHpRatio(),
+            'hasCalledHelp' => $m->hasCalledHelp(),
             'targetCharacterId' => $m->getTopThreatCharacterId($now),
             'effects' => $effects,
         ];

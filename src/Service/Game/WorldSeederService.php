@@ -103,10 +103,28 @@ final class WorldSeederService
             ['seigneur_dolomieu', 'Seigneur du Dolomieu (World Boss)', 65, MonsterScaling::ARCHETYPE_WORLD_BOSS, 28.0, 12.5, 9.5, 1.8, 180, true, true, true, 'boss_volcano', '#dc2626', 3.8],
         ];
 
+        $socialConfigs = [
+            'guepe_cotiere' => [0.35, 95.0],
+            'paille_en_queue' => [0.30, 110.0],
+            'tec_tec_foret' => [0.35, 95.0],
+            'sanglier_salazie' => [0.30, 105.0],
+            'zoizo_lunettes' => [0.40, 110.0],
+            'tuit_tuit' => [0.35, 105.0],
+            'oiseau_vert_cilaos' => [0.40, 110.0],
+            'cerf_java' => [0.30, 115.0],
+            'merle_peyi' => [0.35, 105.0],
+            'gecko_manapany' => [0.35, 95.0],
+            'petrel_barau' => [0.35, 115.0],
+            'petrel_noir' => [0.35, 115.0],
+            'roussette_bourbon' => [0.40, 120.0],
+            'molosse_magma' => [0.30, 115.0],
+        ];
+
         $templates = [];
         foreach ($templateSpecs as $spec) {
             [$code, $name, $lvl, $archetype, $aggro, $range, $speed, $interval, $respawn, $aggressive, $isBoss, $isWorldBoss, $mesh, $color, $scale] = $spec;
             $scaled = MonsterScaling::computeStats($lvl, $archetype);
+            $socialCfg = $socialConfigs[$code] ?? null;
             $tpl = $this->templateRepository->findOneByCode($code);
             if (!$tpl instanceof MonsterTemplate) {
                 $tpl = new MonsterTemplate($code, $name);
@@ -128,7 +146,10 @@ final class WorldSeederService
                 ->setIsWorldBoss($isWorldBoss)
                 ->setMeshKey($mesh)
                 ->setPrimaryColor($color)
-                ->setScale($scale);
+                ->setScale($scale)
+                ->setSocial($socialCfg !== null)
+                ->setFleeHpRatio($socialCfg[0] ?? 0.0)
+                ->setCallHelpRadius($socialCfg[1] ?? 0.0);
             $templates[$code] = $tpl;
         }
         $this->em->flush();
@@ -273,11 +294,123 @@ final class WorldSeederService
             $spawned = $existingCount;
         }
 
+        $spawned += $this->ensureSocialCompatriotPairs($templates);
+
         return [
             'zones' => $zonesCount,
             'templates' => count($templates),
             'monsters' => $spawned,
         ];
+    }
+
+    /**
+     * @param array<string, MonsterTemplate> $templates
+     */
+    private function ensureSocialCompatriotPairs(array $templates): int
+    {
+        $safeCenters = $this->buildSafeCenters();
+        $byTemplate = [];
+        foreach ($this->instanceRepository->findAll() as $inst) {
+            $byTemplate[$inst->getTemplate()->getCode()][] = $inst;
+        }
+
+        $added = 0;
+        $radii = [32.0, 24.0, 42.0];
+
+        foreach ($templates as $code => $tpl) {
+            if (!$tpl->isSocial()) {
+                continue;
+            }
+            $group = $byTemplate[$code] ?? [];
+            $threshold = max(12.0, $tpl->getCallHelpRadius() * 0.85);
+
+            foreach ($group as $inst) {
+                $zone = $inst->getZoneCode();
+                $hasBuddy = false;
+                foreach ($group as $other) {
+                    if ($other === $inst || $other->getZoneCode() !== $zone) {
+                        continue;
+                    }
+                    if (hypot($other->getSpawnX() - $inst->getSpawnX(), $other->getSpawnZ() - $inst->getSpawnZ()) <= $threshold) {
+                        $hasBuddy = true;
+                        break;
+                    }
+                }
+                if ($hasBuddy) {
+                    continue;
+                }
+
+                $buddyPos = null;
+                foreach ($radii as $radius) {
+                    for ($deg = 0; $deg < 360; $deg += 45) {
+                        $rad = deg2rad((float) $deg);
+                        $bx = $inst->getSpawnX() + cos($rad) * $radius;
+                        $bz = $inst->getSpawnZ() + sin($rad) * $radius;
+                        if (!$this->terrainService->isWalkable($bx, $bz)) {
+                            continue;
+                        }
+                        if ($this->terrainService->getZoneCode($bx, $bz) !== $zone) {
+                            continue;
+                        }
+                        if ($this->isInsideSafeCenter($bx, $bz, $safeCenters)) {
+                            continue;
+                        }
+                        $buddyPos = [
+                            'x' => round($bx, 2),
+                            'y' => $this->terrainService->getHeight($bx, $bz),
+                            'z' => round($bz, 2),
+                        ];
+                        break 2;
+                    }
+                }
+
+                if ($buddyPos !== null) {
+                    $buddy = new MonsterInstance($tpl, $zone, $buddyPos['x'], $buddyPos['y'], $buddyPos['z']);
+                    $this->em->persist($buddy);
+                    $group[] = $buddy;
+                    $byTemplate[$code] = $group;
+                    ++$added;
+                }
+            }
+        }
+
+        if ($added > 0) {
+            $this->em->flush();
+        }
+
+        return $added;
+    }
+
+    /**
+     * @return list<array{float, float, float}>
+     */
+    private function buildSafeCenters(): array
+    {
+        $safeCenters = [];
+        foreach (WorldCatalog::zones() as $z) {
+            $safeCenters[] = [$z['respawnX'], $z['respawnZ'], 55.0];
+        }
+        foreach ($this->npcRegistry->all() as $npc) {
+            $safeCenters[] = [$npc->x, $npc->z, 55.0];
+        }
+        // Keep Cratère Dolomieu World Boss arena free of stray trash mobs
+        $safeCenters[] = [WorldCatalog::scaleCoord(440.0), WorldCatalog::scaleCoord(275.0), 90.0];
+
+        return $safeCenters;
+    }
+
+    /**
+     * @param list<array{float, float, float}> $safeCenters
+     */
+    private function isInsideSafeCenter(float $x, float $z, array $safeCenters): bool
+    {
+        foreach ($safeCenters as [$sx, $sz, $minR]) {
+            if (hypot($x - $sx, $z - $sz) < $minR) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -288,17 +421,8 @@ final class WorldSeederService
      */
     private function appendIslandWideSpawns(array &$spawns): void
     {
-        $safeCenters = [];
+        $safeCenters = $this->buildSafeCenters();
         $zones = WorldCatalog::zones();
-        foreach ($zones as $z) {
-            $safeCenters[] = [$z['respawnX'], $z['respawnZ'], 55.0];
-        }
-        foreach ($this->npcRegistry->all() as $npc) {
-            $safeCenters[] = [$npc->x, $npc->z, 55.0];
-        }
-        // Keep Cratère Dolomieu World Boss arena free of stray trash mobs
-        $safeCenters[] = [WorldCatalog::scaleCoord(440.0), WorldCatalog::scaleCoord(275.0), 90.0];
-
         $lagon = $zones['lagon_ouest'];
         $piton = $zones['piton_neiges'];
         $seed = 9742026;

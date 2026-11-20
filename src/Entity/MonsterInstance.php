@@ -15,6 +15,7 @@ class MonsterInstance
 {
     public const string STATE_IDLE = 'IDLE';
     public const string STATE_COMBAT = 'COMBAT';
+    public const string STATE_FLEEING = 'FLEEING';
     public const string STATE_RETURNING = 'RETURNING';
     public const string STATE_DEAD = 'DEAD';
 
@@ -101,6 +102,12 @@ class MonsterInstance
 
     #[ORM\Column]
     private float $respawnAt = 0.0;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $helpTargetMonsterId = null;
+
+    #[ORM\Column(options: ['default' => false])]
+    private bool $hasCalledHelp = false;
 
     public function __construct(MonsterTemplate $template, string $zoneCode, float $x, float $y, float $z)
     {
@@ -413,6 +420,30 @@ class MonsterInstance
     public function setRespawnAt(float $respawnAt): self
     {
         $this->respawnAt = $respawnAt;
+
+        return $this;
+    }
+
+    public function getHelpTargetMonsterId(): ?int
+    {
+        return $this->helpTargetMonsterId;
+    }
+
+    public function setHelpTargetMonsterId(?int $helpTargetMonsterId): self
+    {
+        $this->helpTargetMonsterId = $helpTargetMonsterId;
+
+        return $this;
+    }
+
+    public function hasCalledHelp(): bool
+    {
+        return $this->hasCalledHelp;
+    }
+
+    public function setHasCalledHelp(bool $hasCalledHelp): self
+    {
+        $this->hasCalledHelp = $hasCalledHelp;
 
         return $this;
     }

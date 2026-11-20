@@ -29,6 +29,10 @@ final class WorldSimulationService
     public const float ACTIVE_MONSTER_SIM_RADIUS = 220.0;
     public const float LEASH_DISTANCE = 52.0;
     public const float WORLD_BOSS_LEASH_DISTANCE = 78.0;
+    public const float FLEE_SPEED_MULTIPLIER = 0.85;
+    public const float HELP_ALERT_ARRIVAL_RADIUS = 8.0;
+    public const float HELP_CLUSTER_RADIUS = 14.0;
+    public const int MAX_ALLIES_SUMMONED_PER_CALL = 2;
     public const int WORLD_BOSS_MIN_PLAYERS_NO_REGEN = 3;
     public const float WORLD_BOSS_AOE_RADIUS = 26.0;
     public const float WORLD_BOSS_AOE_COOLDOWN_P1 = 7.0;
@@ -82,8 +86,14 @@ final class WorldSimulationService
                 $this->tickPlayer($player, $step, $now);
             }
 
-            // 2. Tick active monsters (respawn, DoTs, combat, returning, and IDLE mobs near alive online players)
+            // 2. Tick active monsters (respawn, DoTs, combat, fleeing, returning, and IDLE mobs near alive online players)
             $monsters = $this->monsterRepository->findByZone($zoneCode);
+            $monstersById = [];
+            foreach ($monsters as $m) {
+                if ($m->getId() !== null) {
+                    $monstersById[(int) $m->getId()] = $m;
+                }
+            }
             $createdEvents = [];
             $alivePlayers = array_values(array_filter(
                 $players,
@@ -109,7 +119,7 @@ final class WorldSimulationService
                     }
                 }
 
-                $this->tickMonster($monster, $playersById, $step, $now, $createdEvents);
+                $this->tickMonster($monster, $playersById, $monstersById, $step, $now, $createdEvents);
             }
 
             // 3. Opportunistic cleanup of old combat events (> 35s) & expired ground loot
@@ -201,12 +211,14 @@ final class WorldSimulationService
     }
 
     /**
-     * @param array<int, Character> $playersById
-     * @param list<CombatEvent>     $createdEvents
+     * @param array<int, Character>       $playersById
+     * @param array<int, MonsterInstance> $monstersById
+     * @param list<CombatEvent>           $createdEvents
      */
     private function tickMonster(
         MonsterInstance $monster,
         array $playersById,
+        array $monstersById,
         float $step,
         float $now,
         array &$createdEvents,
@@ -232,6 +244,8 @@ final class WorldSimulationService
                 $monster->setActiveEffects([]);
                 $monster->setPhase(1);
                 $monster->setLastSpecialAt(0.0);
+                $monster->setHelpTargetMonsterId(null);
+                $monster->setHasCalledHelp(false);
 
                 if ($template->isWorldBoss()) {
                     $respawnMsg = new ChatMessage(
@@ -305,6 +319,8 @@ final class WorldSimulationService
                 $monster->setRaidContributors([]);
                 $monster->setPhase(1);
                 $monster->setLastSpecialAt(0.0);
+                $monster->setHelpTargetMonsterId(null);
+                $monster->setHasCalledHelp(false);
             } else {
                 $this->moveTowards($monster, $monster->getSpawnX(), $monster->getSpawnZ(), $template->getMoveSpeed() * 1.4 * $step);
                 $monster->setCurrentHp(min($template->getMaxHp(), $monster->getCurrentHp() + (int) round($template->getMaxHp() * 0.2)));
@@ -385,9 +401,13 @@ final class WorldSimulationService
             return;
         }
 
-        // COMBAT state
+        // COMBAT / FLEEING state
         $distFromSpawn = hypot($monster->getPosX() - $monster->getSpawnX(), $monster->getPosZ() - $monster->getSpawnZ());
-        $leash = $template->isWorldBoss() ? self::WORLD_BOSS_LEASH_DISTANCE : self::LEASH_DISTANCE;
+        $leash = $template->isWorldBoss()
+            ? self::WORLD_BOSS_LEASH_DISTANCE
+            : (($monster->getState() === MonsterInstance::STATE_FLEEING || $monster->hasCalledHelp())
+                ? max(self::LEASH_DISTANCE, $template->getCallHelpRadius() + 35.0)
+                : self::LEASH_DISTANCE);
         $targetId = $monster->getTopThreatCharacterId($now);
         $target = ($targetId !== null && isset($playersById[$targetId])) ? $playersById[$targetId] : null;
 
@@ -398,6 +418,8 @@ final class WorldSimulationService
             $monster->setTauntedByCharacterId(null);
             $monster->setPhase(1);
             $monster->setLastSpecialAt(0.0);
+            $monster->setHelpTargetMonsterId(null);
+            $monster->setHasCalledHelp(false);
 
             return;
         }
@@ -434,6 +456,143 @@ final class WorldSimulationService
                 $monster->setLastSpecialAt($now - ($aoeCd - 4.0));
             } elseif (($now - $monster->getLastSpecialAt()) >= $aoeCd) {
                 $this->performWorldBossEruption($monster, $playersById, $now, $createdEvents);
+            }
+        }
+
+        // Social AI: seek nearby idle same-species compatriots when HP drops below threshold
+        if (
+            $monster->getState() === MonsterInstance::STATE_COMBAT
+            && $template->isSocial()
+            && !$template->isWorldBoss()
+            && !$monster->hasCalledHelp()
+            && $monster->getTauntedByCharacterId() === null
+            && $monster->getCurrentHp() > 0
+            && ($monster->getCurrentHp() / max(1, $template->getMaxHp())) <= $template->getFleeHpRatio()
+        ) {
+            $ally = $this->findNearestIdleCompatriot($monster, $monstersById, $template->getCallHelpRadius());
+            if ($ally !== null) {
+                $monster->setState(MonsterInstance::STATE_FLEEING)
+                    ->setHelpTargetMonsterId((int) $ally->getId());
+
+                $fleeEv = new CombatEvent(
+                    $monster->getZoneCode(),
+                    'FLEE',
+                    'MONSTER',
+                    (int) $monster->getId(),
+                    $template->getName(),
+                    'MONSTER',
+                    (int) $ally->getId(),
+                    $ally->getTemplate()->getName(),
+                    'seek_help',
+                    0,
+                    false,
+                    $monster->getPosX(),
+                    $monster->getPosY(),
+                    $monster->getPosZ(),
+                    $now,
+                );
+                $this->em->persist($fleeEv);
+                $createdEvents[] = $fleeEv;
+            }
+        }
+
+        if ($monster->getState() === MonsterInstance::STATE_FLEEING) {
+            $allyId = $monster->getHelpTargetMonsterId();
+            $ally = $allyId !== null ? ($monstersById[$allyId] ?? null) : null;
+            if ($ally === null || $ally->getState() !== MonsterInstance::STATE_IDLE) {
+                $ally = $this->findNearestIdleCompatriot($monster, $monstersById, $template->getCallHelpRadius());
+            }
+
+            if ($ally === null) {
+                $monster->setState(MonsterInstance::STATE_COMBAT)
+                    ->setHelpTargetMonsterId(null);
+            } else {
+                $monster->setHelpTargetMonsterId((int) $ally->getId());
+                $distToAlly = hypot($ally->getPosX() - $monster->getPosX(), $ally->getPosZ() - $monster->getPosZ());
+
+                if ($distToAlly > self::HELP_ALERT_ARRIVAL_RADIUS) {
+                    $prevX = $monster->getPosX();
+                    $prevZ = $monster->getPosZ();
+                    $this->moveTowards($monster, $ally->getPosX(), $ally->getPosZ(), $template->getMoveSpeed() * self::FLEE_SPEED_MULTIPLIER * $step);
+                    $moved = hypot($monster->getPosX() - $prevX, $monster->getPosZ() - $prevZ);
+                    $distToAlly = hypot($ally->getPosX() - $monster->getPosX(), $ally->getPosZ() - $monster->getPosZ());
+
+                    if ($moved < 0.05 && $distToAlly > self::HELP_ALERT_ARRIVAL_RADIUS) {
+                        $monster->setState(MonsterInstance::STATE_COMBAT)
+                            ->setHelpTargetMonsterId(null);
+                    } elseif ($distToAlly > self::HELP_ALERT_ARRIVAL_RADIUS) {
+                        return;
+                    }
+                }
+
+                if ($monster->getState() === MonsterInstance::STATE_FLEEING && $distToAlly <= self::HELP_ALERT_ARRIVAL_RADIUS) {
+                    $candidates = [];
+                    $clusterSq = self::HELP_CLUSTER_RADIUS * self::HELP_CLUSTER_RADIUS;
+                    foreach ($monstersById as $cand) {
+                        if (
+                            $cand->getId() === $monster->getId()
+                            || $cand->getTemplate()->getId() !== $template->getId()
+                            || $cand->getState() !== MonsterInstance::STATE_IDLE
+                        ) {
+                            continue;
+                        }
+                        if ($cand->getId() === $ally->getId()) {
+                            $candidates[] = ['d2' => 0.0, 'm' => $cand];
+                            continue;
+                        }
+                        $dx = $cand->getPosX() - $ally->getPosX();
+                        $dz = $cand->getPosZ() - $ally->getPosZ();
+                        $d2 = $dx * $dx + $dz * $dz;
+                        if ($d2 <= $clusterSq) {
+                            $candidates[] = ['d2' => $d2, 'm' => $cand];
+                        }
+                    }
+
+                    usort($candidates, static fn (array $a, array $b): int => $a['d2'] <=> $b['d2']);
+                    $recruitedAllies = array_map(
+                        static fn (array $row): MonsterInstance => $row['m'],
+                        array_slice($candidates, 0, self::MAX_ALLIES_SUMMONED_PER_CALL),
+                    );
+
+                    foreach ($recruitedAllies as $recruited) {
+                        foreach ($monster->getThreatTable() as $cidStr => $score) {
+                            $recruited->addThreat((int) $cidStr, max(15.0, $score * 0.5));
+                        }
+                        if (!array_key_exists((string) $target->getId(), $recruited->getThreatTable())) {
+                            $recruited->addThreat((int) $target->getId(), 20.0);
+                        }
+                        $recruited->setState(MonsterInstance::STATE_COMBAT)
+                            ->setHasCalledHelp(true)
+                            ->setHelpTargetMonsterId(null);
+                        $recruited->setRotY(atan2($target->getPosX() - $recruited->getPosX(), $target->getPosZ() - $recruited->getPosZ()));
+                    }
+
+                    $monster->setState(MonsterInstance::STATE_COMBAT)
+                        ->setHasCalledHelp(true)
+                        ->setHelpTargetMonsterId(null);
+
+                    $helpEv = new CombatEvent(
+                        $monster->getZoneCode(),
+                        'CALL_HELP',
+                        'MONSTER',
+                        (int) $monster->getId(),
+                        $template->getName(),
+                        'MONSTER',
+                        (int) $ally->getId(),
+                        $ally->getTemplate()->getName(),
+                        'call_help',
+                        count($recruitedAllies),
+                        false,
+                        $ally->getPosX(),
+                        $ally->getPosY(),
+                        $ally->getPosZ(),
+                        $now,
+                    );
+                    $this->em->persist($helpEv);
+                    $createdEvents[] = $helpEv;
+
+                    return;
+                }
             }
         }
 
@@ -671,5 +830,40 @@ final class WorldSimulationService
         }
 
         $monster->setRotY(atan2($dx, $dz));
+    }
+
+    /**
+     * @param array<int, MonsterInstance> $monstersById
+     */
+    private function findNearestIdleCompatriot(MonsterInstance $caller, array $monstersById, float $radius): ?MonsterInstance
+    {
+        if ($radius <= 0.0) {
+            return null;
+        }
+
+        $tplId = $caller->getTemplate()->getId();
+        $callerId = $caller->getId();
+        $best = null;
+        $bestDistSq = $radius * $radius;
+
+        foreach ($monstersById as $cand) {
+            if (
+                $cand->getId() === $callerId
+                || $cand->getTemplate()->getId() !== $tplId
+                || $cand->getState() !== MonsterInstance::STATE_IDLE
+            ) {
+                continue;
+            }
+
+            $dx = $cand->getPosX() - $caller->getPosX();
+            $dz = $cand->getPosZ() - $caller->getPosZ();
+            $d2 = $dx * $dx + $dz * $dz;
+            if ($d2 <= $bestDistSq) {
+                $bestDistSq = $d2;
+                $best = $cand;
+            }
+        }
+
+        return $best;
     }
 }

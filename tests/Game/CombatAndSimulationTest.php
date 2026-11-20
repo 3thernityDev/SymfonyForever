@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Game;
 
 use App\Entity\Character;
+use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Entity\MonsterTemplate;
 use App\Entity\Party;
@@ -15,6 +16,7 @@ use App\Game\MonsterRespawnScaler;
 use App\Game\WorldCatalog;
 use App\Repository\MonsterTemplateRepository;
 use App\Service\Game\CombatService;
+use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatCalculator;
 use App\Service\Game\WorldSeederService;
 use App\Service\Game\WorldSimulationService;
@@ -529,5 +531,216 @@ final class CombatAndSimulationTest extends KernelTestCase
         $this->sim->maybeTickZone('cilaos', $t3 + 10.0);
         self::assertSame(MonsterInstance::STATE_IDLE, $m3->getState());
         self::assertSame(100, $m3->getCurrentHp());
+    }
+
+    public function testSocialMobFleesAtLowHpAndSummonsSameSpeciesCompatriot(): void
+    {
+        $now = 35000.0;
+        $terrain = self::getContainer()->get(ReunionTerrainService::class);
+        $salazie = WorldCatalog::zones()['salazie'];
+        $origin = $terrain->findNearestWalkable($salazie['respawnX'], $salazie['respawnZ']);
+
+        // Pick a guaranteed walkable 60m corridor direction
+        $ux = 1.0;
+        $uz = 0.0;
+        for ($deg = 0; $deg < 360; $deg += 15) {
+            $rad = deg2rad((float) $deg);
+            $cx = cos($rad);
+            $cz = sin($rad);
+            $ok = true;
+            for ($d = 2.0; $d <= 60.0; $d += 4.0) {
+                if (!$terrain->isWalkable($origin['x'] + $cx * $d, $origin['z'] + $cz * $d)) {
+                    $ok = false;
+                    break;
+                }
+            }
+            if ($ok) {
+                $ux = $cx;
+                $uz = $cz;
+                break;
+            }
+        }
+
+        $pt = static fn (float $dist): array => [
+            'x' => $origin['x'] + $ux * $dist,
+            'y' => $terrain->getHeight($origin['x'] + $ux * $dist, $origin['z'] + $uz * $dist),
+            'z' => $origin['z'] + $uz * $dist,
+        ];
+
+        $zone = (new Zone('salazie', 'Salazie'))->setLastTickAt($now - 5.0);
+        $this->em->persist($zone);
+
+        $user = (new User())->setUsername('social_ai')->setEmail('social@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $dps = (new Character($user, 'SocialDps', CharacterClass::DPS))
+            ->setLevel(10)->setZoneCode('salazie')
+            ->setPosX($origin['x'])->setPosY($origin['y'])->setPosZ($origin['z'])
+            ->setLastSeenAt($now);
+        $tank = (new Character($user, 'SocialTank', CharacterClass::TANK))
+            ->setLevel(10)->setZoneCode('salazie')
+            ->setPosX($origin['x'])->setPosY($origin['y'])->setPosZ($origin['z'])
+            ->setLastSeenAt($now);
+
+        foreach ([$dps, $tank] as $hero) {
+            $s = $this->stats->compute($hero, $now);
+            $hero->setCurrentHp($s['maxHp'] + 5000)->setCurrentMp($s['maxMp']);
+            $this->em->persist($hero);
+        }
+
+        $socialTpl = (new MonsterTemplate('social_bird', 'Tec-Tec Social'))
+            ->setLevel(10)->setMaxHp(1000)->setAttack(5)->setDefense(0)->setXpReward(100)
+            ->setMoveSpeed(12.0)->setAggressive(false)
+            ->setSocial(true)->setFleeHpRatio(0.35)->setCallHelpRadius(80.0);
+        $otherTpl = (new MonsterTemplate('other_boar', 'Sanglier Solitaire'))
+            ->setLevel(10)->setMaxHp(1000)->setAttack(5)->setDefense(0)->setXpReward(100)
+            ->setMoveSpeed(10.0)->setAggressive(false)
+            ->setSocial(false)->setFleeHpRatio(0.0)->setCallHelpRadius(0.0);
+        $this->em->persist($socialTpl);
+        $this->em->persist($otherTpl);
+
+        $pCaller = $pt(3.0);
+        $pStranger = $pt(14.0);
+        $pAllySame = $pt(30.0);
+        $pThirdSame = $pt(58.0);
+
+        $caller = (new MonsterInstance($socialTpl, 'salazie', $pCaller['x'], $pCaller['y'], $pCaller['z']))
+            ->setCurrentHp(600)->setState(MonsterInstance::STATE_COMBAT);
+        $caller->addThreat(1, 50.0); // placeholder replaced right after flush
+        $strangerOther = new MonsterInstance($otherTpl, 'salazie', $pStranger['x'], $pStranger['y'], $pStranger['z']);
+        $allySame = new MonsterInstance($socialTpl, 'salazie', $pAllySame['x'], $pAllySame['y'], $pAllySame['z']);
+        $thirdSame = new MonsterInstance($socialTpl, 'salazie', $pThirdSame['x'], $pThirdSame['y'], $pThirdSame['z']);
+
+        foreach ([$caller, $strangerOther, $allySame, $thirdSame] as $m) {
+            $this->em->persist($m);
+        }
+        $this->em->flush();
+
+        $caller->setThreatTable([(string) $dps->getId() => 50.0]);
+        $this->em->flush();
+
+        // 1. Above 35% HP -> stays in COMBAT, does not flee
+        $this->sim->maybeTickZone('salazie', $now + 1.5);
+        self::assertSame(MonsterInstance::STATE_COMBAT, $caller->getState());
+        self::assertSame(MonsterInstance::STATE_IDLE, $allySame->getState());
+        self::assertSame(MonsterInstance::STATE_IDLE, $strangerOther->getState());
+
+        // 2. Drops to <= 35% HP -> enters FLEEING toward same-species allySame (ignoring closer other_boar)
+        $caller->setCurrentHp(300);
+        $dps->setLastSeenAt($now + 3.0);
+        $tank->setLastSeenAt($now + 3.0);
+        $this->em->flush();
+
+        $distBeforeFlee = hypot($allySame->getPosX() - $caller->getPosX(), $allySame->getPosZ() - $caller->getPosZ());
+        $this->sim->maybeTickZone('salazie', $now + 3.0);
+        $distAfterFlee = hypot($allySame->getPosX() - $caller->getPosX(), $allySame->getPosZ() - $caller->getPosZ());
+
+        self::assertSame(MonsterInstance::STATE_FLEEING, $caller->getState());
+        self::assertSame($allySame->getId(), $caller->getHelpTargetMonsterId());
+        self::assertLessThan($distBeforeFlee, $distAfterFlee, 'Le mob social doit courir vers son compatriote.');
+
+        $fleeEvents = $this->em->createQuery('SELECT e FROM App\Entity\CombatEvent e WHERE e.eventType = :t AND e.sourceId = :id')
+            ->setParameter('t', 'FLEE')
+            ->setParameter('id', $caller->getId())
+            ->getResult();
+        self::assertNotEmpty($fleeEvents, 'Un événement FLEE doit être émis.');
+
+        // 3. Hitting a fleeing mob with non-lethal damage preserves STATE_FLEEING
+        $dps->setPosX($caller->getPosX() - $ux * 2.0)->setPosZ($caller->getPosZ() - $uz * 2.0)->setLastSeenAt($now + 4.0);
+        $this->em->flush();
+        $aa = $this->combat->performAutoAttack($dps, 'MONSTER', $caller->getId(), $now + 4.0);
+        self::assertTrue($aa['ok']);
+        self::assertSame(MonsterInstance::STATE_FLEEING, $caller->getState());
+
+        // 4. Reaches allySame -> rallies allySame into COMBAT, keeps other species & far 3rd ally IDLE, emits CALL_HELP
+        $dps->setLastSeenAt($now + 6.0);
+        $tank->setLastSeenAt($now + 6.0);
+        $this->em->flush();
+        $this->sim->maybeTickZone('salazie', $now + 6.0);
+
+        self::assertSame(MonsterInstance::STATE_COMBAT, $caller->getState());
+        self::assertTrue($caller->hasCalledHelp());
+        self::assertSame(MonsterInstance::STATE_COMBAT, $allySame->getState());
+        self::assertTrue($allySame->hasCalledHelp());
+        self::assertSame($dps->getId(), $allySame->getTopThreatCharacterId($now + 6.0));
+        self::assertSame(MonsterInstance::STATE_IDLE, $strangerOther->getState(), 'Une autre espèce ne doit pas être ralliée.');
+        self::assertSame(MonsterInstance::STATE_IDLE, $thirdSame->getState());
+
+        $helpEvents = $this->em->createQuery('SELECT e FROM App\Entity\CombatEvent e WHERE e.eventType = :t AND e.sourceId = :id')
+            ->setParameter('t', 'CALL_HELP')
+            ->setParameter('id', $caller->getId())
+            ->getResult();
+        self::assertNotEmpty($helpEvents, 'Un événement CALL_HELP doit être émis.');
+
+        // 5. No infinite chain-fleeing: summoned allySame at 20% HP next to 3rd same-species mob stays COMBAT
+        $allySame->setCurrentHp(200);
+        $dps->setLastSeenAt($now + 8.0);
+        $tank->setLastSeenAt($now + 8.0);
+        $this->em->flush();
+        $this->sim->maybeTickZone('salazie', $now + 8.0);
+        self::assertSame(MonsterInstance::STATE_COMBAT, $allySame->getState());
+        self::assertSame(MonsterInstance::STATE_IDLE, $thirdSame->getState());
+
+        // 6. Tank Taunt interrupts FLEEING back into COMBAT and prevents re-fleeing while taunted
+        $pFlee2 = $pt(18.0);
+        $fleeable2 = (new MonsterInstance($socialTpl, 'salazie', $pFlee2['x'], $pFlee2['y'], $pFlee2['z']))
+            ->setCurrentHp(250)->setState(MonsterInstance::STATE_COMBAT);
+        $fleeable2->setThreatTable([(string) $dps->getId() => 50.0]);
+        $this->em->persist($fleeable2);
+        $this->em->flush();
+
+        $dps->setLastSeenAt($now + 10.0);
+        $tank->setLastSeenAt($now + 10.0);
+        $this->em->flush();
+        $this->sim->maybeTickZone('salazie', $now + 10.0);
+        self::assertSame(MonsterInstance::STATE_FLEEING, $fleeable2->getState());
+
+        $tank->setPosX($fleeable2->getPosX() - $ux * 3.0)->setPosZ($fleeable2->getPosZ() - $uz * 3.0)->setLastSeenAt($now + 11.0);
+        $this->em->flush();
+        $tauntRes = $this->combat->castSkill($tank, 'piton_taunt', 'MONSTER', $fleeable2->getId(), $now + 11.0);
+        self::assertTrue($tauntRes['ok']);
+        self::assertSame(MonsterInstance::STATE_COMBAT, $fleeable2->getState());
+        self::assertNull($fleeable2->getHelpTargetMonsterId());
+
+        $dps->setLastSeenAt($now + 12.5);
+        $tank->setLastSeenAt($now + 12.5);
+        $this->em->flush();
+        $this->sim->maybeTickZone('salazie', $now + 12.5);
+        self::assertSame(MonsterInstance::STATE_COMBAT, $fleeable2->getState(), 'Sous Provocation, le mob ne doit pas repartir fuir.');
+
+        // 7a. Non-social mob at 15% HP next to same-species ally does NOT flee
+        $pOther2 = $pt(16.0);
+        $otherAlly = new MonsterInstance($otherTpl, 'salazie', $pOther2['x'], $pOther2['y'], $pOther2['z']);
+        $strangerOther->setCurrentHp(150)->setState(MonsterInstance::STATE_COMBAT)
+            ->setThreatTable([(string) $dps->getId() => 50.0]);
+        $this->em->persist($otherAlly);
+        $this->em->flush();
+
+        $dps->setLastSeenAt($now + 14.5);
+        $tank->setLastSeenAt($now + 14.5);
+        $this->em->flush();
+        $this->sim->maybeTickZone('salazie', $now + 14.5);
+        self::assertSame(MonsterInstance::STATE_COMBAT, $strangerOther->getState());
+        self::assertSame(MonsterInstance::STATE_IDLE, $otherAlly->getState());
+
+        // 7b. Isolated social mob with no idle compatriot within callHelpRadius fights instead of fleeing
+        $isolated = (new MonsterInstance($socialTpl, 'salazie', $origin['x'] - 250.0, $origin['y'], $origin['z'] - 250.0))
+            ->setCurrentHp(150)->setState(MonsterInstance::STATE_COMBAT);
+        $isoHero = (new Character($user, 'IsoHero', CharacterClass::DPS))
+            ->setLevel(10)->setZoneCode('salazie')
+            ->setPosX($origin['x'] - 247.0)->setPosY($origin['y'])->setPosZ($origin['z'] - 250.0)
+            ->setLastSeenAt($now + 16.5);
+        $is = $this->stats->compute($isoHero, $now + 16.5);
+        $isoHero->setCurrentHp($is['maxHp'])->setCurrentMp($is['maxMp']);
+        $this->em->persist($isoHero);
+        $this->em->persist($isolated);
+        $this->em->flush();
+
+        $isolated->setThreatTable([(string) $isoHero->getId() => 50.0]);
+        $dps->setLastSeenAt($now + 16.5);
+        $tank->setLastSeenAt($now + 16.5);
+        $this->em->flush();
+        $this->sim->maybeTickZone('salazie', $now + 16.5);
+        self::assertSame(MonsterInstance::STATE_COMBAT, $isolated->getState());
     }
 }

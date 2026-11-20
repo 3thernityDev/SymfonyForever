@@ -60,6 +60,20 @@ export class VfxManager {
       return;
     }
 
+    if (ev.eventType === 'FLEE') {
+      const origin = sourcePos ? sourcePos.clone() : pos;
+      this.spawnExpandingRing(origin, '#fbbf24', 5.5, 0.65);
+      this.spawnFloatingText(origin.clone().add(new THREE.Vector3(0, 3.1, 0)), '🏃 À L\'AIDE !', '#fbbf24', 16, camera);
+      return;
+    }
+
+    if (ev.eventType === 'CALL_HELP') {
+      this.spawnExpandingRing(pos, '#f97316', 10.0, 0.75);
+      const label = ev.amount > 1 ? `⚠️ RENFORTS ! (+${ev.amount})` : '⚠️ RENFORT !';
+      this.spawnFloatingText(pos.clone().add(new THREE.Vector3(0, 3.5, 0)), label, '#fb923c', 17, camera);
+      return;
+    }
+
     if (ev.eventType === 'HEAL' || ev.eventType === 'HOT') {
       this.spawnExpandingRing(pos, colorHex, skill?.vfxStyle === 'LAGOON_WAVE' ? 9.0 : 2.6, 0.65);
       const label = ev.isCrit ? `+${ev.amount} CRIT!` : `+${ev.amount}`;

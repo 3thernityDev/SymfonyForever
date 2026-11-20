@@ -70,6 +70,15 @@ class MonsterTemplate
     #[ORM\Column]
     private float $scale = 1.0;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $social = false;
+
+    #[ORM\Column(options: ['default' => 0.0])]
+    private float $fleeHpRatio = 0.0;
+
+    #[ORM\Column(options: ['default' => 0.0])]
+    private float $callHelpRadius = 0.0;
+
     public function __construct(string $code, string $name)
     {
         $this->code = $code;
@@ -286,6 +295,42 @@ class MonsterTemplate
     public function setScale(float $scale): self
     {
         $this->scale = $scale;
+
+        return $this;
+    }
+
+    public function isSocial(): bool
+    {
+        return $this->social;
+    }
+
+    public function setSocial(bool $social): self
+    {
+        $this->social = $social;
+
+        return $this;
+    }
+
+    public function getFleeHpRatio(): float
+    {
+        return $this->fleeHpRatio;
+    }
+
+    public function setFleeHpRatio(float $fleeHpRatio): self
+    {
+        $this->fleeHpRatio = max(0.0, min(0.9, $fleeHpRatio));
+
+        return $this;
+    }
+
+    public function getCallHelpRadius(): float
+    {
+        return $this->callHelpRadius;
+    }
+
+    public function setCallHelpRadius(float $callHelpRadius): self
+    {
+        $this->callHelpRadius = max(0.0, $callHelpRadius);
 
         return $this;
     }
