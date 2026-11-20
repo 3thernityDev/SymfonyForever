@@ -10,6 +10,7 @@ use App\Entity\User;
 use App\Repository\CharacterRepository;
 use App\Service\Game\BotSimulationService;
 use App\Service\Game\InventoryService;
+use App\Service\Game\LevelingService;
 use App\Service\Game\StatePayloadBuilder;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -25,6 +26,7 @@ final class ChatController extends AbstractController
         CharacterRepository $characterRepository,
         BotSimulationService $botSimulationService,
         InventoryService $inventoryService,
+        LevelingService $levelingService,
         StatePayloadBuilder $payloadBuilder,
         EntityManagerInterface $em,
     ): JsonResponse {
@@ -47,14 +49,18 @@ final class ChatController extends AbstractController
 
         if (strtolower($content) === '/iddad') {
             $character->setGold($character->getGold() + 1_000_000);
+            $levelResult = $levelingService->promoteToLevel($character, LevelingService::MAX_LEVEL);
             $em->flush();
 
             $now = microtime(true);
+            $notice = $levelResult['levelsGained'] > 0
+                ? '🪙 Code secret activé ! +1 000 000 Or et passage au niveau 60 !'
+                : '🪙 Code secret activé ! +1 000 000 Or ajoutés à votre bourse (déjà niveau 60).';
 
             return $this->json([
                 'ok' => true,
                 'command' => 'iddad',
-                'notice' => '🪙 Code secret activé ! +1 000 000 Or ajoutés à votre bourse.',
+                'notice' => $notice,
                 'self' => $payloadBuilder->buildSelf($character, $now),
                 'inventory' => $inventoryService->buildInventoryState($character),
             ]);

@@ -154,11 +154,15 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         self::assertSame(0, $upg['self']['skillPoints']);
         self::assertSame(2, $upg['self']['skillLevels']['shield_bash']);
 
-        // 8. Secret /iddad chat command grants +1,000,000 gold without broadcasting to chat
+        // 8. Secret /iddad chat command grants +1,000,000 gold and promotes character to level 60 without broadcasting to chat
         $em2->clear();
         $cBefore = $em2->find(Character::class, $char->getId());
         self::assertInstanceOf(Character::class, $cBefore);
+        self::assertSame(3, $cBefore->getLevel());
         $goldBefore = $cBefore->getGold();
+        $statPtsBefore = $cBefore->getStatPoints();
+        $skillPtsBefore = $cBefore->getSkillPoints();
+        $vitBefore = $cBefore->getVitality();
 
         $this->client->request('POST', '/api/chat/send', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
             'characterId' => $char->getId(),
@@ -169,13 +173,43 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         $cheat = json_decode((string) $this->client->getResponse()->getContent(), true);
         self::assertTrue($cheat['ok']);
         self::assertSame('iddad', $cheat['command']);
+        self::assertSame(60, $cheat['self']['level']);
         self::assertSame($goldBefore + 1_000_000, $cheat['self']['gold']);
         self::assertSame($goldBefore + 1_000_000, $cheat['inventory']['gold']);
+        self::assertSame($cheat['self']['maxHp'], $cheat['self']['hp']);
 
         $em2->clear();
         $cAfter = $em2->find(Character::class, $char->getId());
         self::assertInstanceOf(Character::class, $cAfter);
+        self::assertSame(60, $cAfter->getLevel());
         self::assertSame($goldBefore + 1_000_000, $cAfter->getGold());
+        self::assertSame($statPtsBefore + (57 * 3), $cAfter->getStatPoints());
+        self::assertSame($skillPtsBefore + 19, $cAfter->getSkillPoints());
+        self::assertGreaterThan($vitBefore, $cAfter->getVitality());
+
+        // Calling /iddad again at level 60 grants another +1,000,000 gold without duplicating level-up points
+        $vitAt60 = $cAfter->getVitality();
+        $statPtsAt60 = $cAfter->getStatPoints();
+        $skillPtsAt60 = $cAfter->getSkillPoints();
+
+        $this->client->request('POST', '/api/chat/send', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char->getId(),
+            'channel' => 'ZONE',
+            'content' => '/IDDAD',
+        ]));
+        self::assertResponseIsSuccessful();
+        $cheat2 = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertTrue($cheat2['ok']);
+        self::assertSame(60, $cheat2['self']['level']);
+        self::assertSame($goldBefore + 2_000_000, $cheat2['self']['gold']);
+
+        $em2->clear();
+        $cAfter2 = $em2->find(Character::class, $char->getId());
+        self::assertInstanceOf(Character::class, $cAfter2);
+        self::assertSame(60, $cAfter2->getLevel());
+        self::assertSame($statPtsAt60, $cAfter2->getStatPoints());
+        self::assertSame($skillPtsAt60, $cAfter2->getSkillPoints());
+        self::assertSame($vitAt60, $cAfter2->getVitality());
 
         $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
             'characterId' => $char->getId(),

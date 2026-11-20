@@ -84,6 +84,54 @@ final class LevelingService
     }
 
     /**
+     * Directly promotes a character up to $targetLevel (capped at MAX_LEVEL), applying
+     * the exact per-level class stat growth, free stat points, skill points, and full HP/MP restore.
+     *
+     * @return array{leveledUp: bool, newLevel: int, levelsGained: int, skillPointsGained: int}
+     */
+    public function promoteToLevel(Character $character, int $targetLevel): array
+    {
+        $target = min(self::MAX_LEVEL, max(1, $targetLevel));
+        if ($character->getLevel() >= $target) {
+            return ['leveledUp' => false, 'newLevel' => $character->getLevel(), 'levelsGained' => 0, 'skillPointsGained' => 0];
+        }
+
+        $levelsGained = 0;
+        $skillPointsGained = 0;
+        $growth = $character->getCharacterClass()->levelGrowth();
+
+        while ($character->getLevel() < $target) {
+            $character->setLevel($character->getLevel() + 1);
+            ++$levelsGained;
+
+            if ($character->getLevel() % self::SKILL_POINT_INTERVAL === 0) {
+                $character->setSkillPoints($character->getSkillPoints() + 1);
+                ++$skillPointsGained;
+            }
+
+            $character->setVitality($character->getVitality() + $growth['vitality']);
+            $character->setStrength($character->getStrength() + $growth['strength']);
+            $character->setIntelligence($character->getIntelligence() + $growth['intelligence']);
+            $character->setDefense($character->getDefense() + $growth['defense']);
+            $character->setSpirit($character->getSpirit() + $growth['spirit']);
+            $character->setStatPoints($character->getStatPoints() + self::FREE_STAT_POINTS_PER_LEVEL);
+        }
+
+        $character->setXp(0);
+        $stats = $this->statCalculator->compute($character);
+        $character->setCurrentHp($stats['maxHp']);
+        $character->setCurrentMp($stats['maxMp']);
+        $character->setIsDead(false);
+
+        return [
+            'leveledUp' => true,
+            'newLevel' => $character->getLevel(),
+            'levelsGained' => $levelsGained,
+            'skillPointsGained' => $skillPointsGained,
+        ];
+    }
+
+    /**
      * Spends 1 skill point earned every 3 levels to permanently rank up a class skill (Rank 1..5).
      *
      * @return array{ok: bool, error?: string, newRank?: int}
