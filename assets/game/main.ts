@@ -678,6 +678,25 @@ class SymfonyForeverGame {
 
     this.vfx.spawnFromEvent(ev, this.manifest.skills, this.camera, srcPos, tgtPos, sourceClassCode);
 
+    // Immediately reflect monster damage & death locally so rapid consecutive attacks/skills never re-target a dead mob
+    if (ev.targetType === 'MONSTER') {
+      const mEntry = this.monsters.get(ev.targetId);
+      if (mEntry) {
+        if (ev.eventType === 'DAMAGE' || ev.eventType === 'DOT') {
+          mEntry.state.hp = Math.max(0, mEntry.state.hp - ev.amount);
+          if (mEntry.state.hp <= 0) {
+            mEntry.state.state = 'DEAD';
+          }
+        } else if (ev.eventType === 'KILL') {
+          mEntry.state.hp = 0;
+          mEntry.state.state = 'DEAD';
+        }
+        if (this.targetType === 'MONSTER' && this.targetId === ev.targetId) {
+          this.updateTargetHud();
+        }
+      }
+    }
+
     // Log into Combat tab
     const skillName =
       ev.skillCode === 'auto_attack'

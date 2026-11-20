@@ -172,12 +172,13 @@ final class CombatService
                     ? $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ())
                     : INF;
 
-                if (!$isAliveTarget || $dist > $skill->range) {
-                    $nearest = $this->resolveNearestAliveMonsterInRange($caster, $skill->range);
-                    if ($nearest instanceof MonsterInstance) {
+                $nearest = $this->resolveNearestAliveMonsterInRange($caster, $skill->range);
+                if ($nearest instanceof MonsterInstance) {
+                    $nearestDist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $nearest->getPosX(), $nearest->getPosZ());
+                    if (!$isAliveTarget || $dist > $skill->range || $nearestDist < $dist - 0.001) {
                         $monster = $nearest;
                         $isAliveTarget = true;
-                        $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
+                        $dist = $nearestDist;
                     }
                 }
 
@@ -270,12 +271,13 @@ final class CombatService
             ? $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ())
             : INF;
 
-        if (!$isAliveTarget || $dist > $range) {
-            $nearest = $this->resolveNearestAliveMonsterInRange($caster, $range);
-            if ($nearest instanceof MonsterInstance) {
+        $nearest = $this->resolveNearestAliveMonsterInRange($caster, $range);
+        if ($nearest instanceof MonsterInstance) {
+            $nearestDist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $nearest->getPosX(), $nearest->getPosZ());
+            if (!$isAliveTarget || $dist > $range || $nearestDist < $dist - 0.001) {
                 $monster = $nearest;
                 $isAliveTarget = true;
-                $dist = $this->distance2D($caster->getPosX(), $caster->getPosZ(), $monster->getPosX(), $monster->getPosZ());
+                $dist = $nearestDist;
             }
         }
 

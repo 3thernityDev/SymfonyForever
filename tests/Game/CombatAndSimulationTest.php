@@ -893,27 +893,37 @@ final class CombatAndSimulationTest extends KernelTestCase
         $this->em->persist($nearestMob);
         $this->em->flush();
 
-        // 1. Auto-attack with no target selected automatically hits the nearest alive monster
-        $aaRes = $this->combat->performAutoAttack($dps, null, null, $now);
+        // 1. Auto-attack with no target (or a farther in-range target at 6.5m) automatically hits the strictly nearest alive monster (2.2m)
+        $aaRes = $this->combat->performAutoAttack($dps, 'MONSTER', $midMob->getId(), $now);
         self::assertTrue($aaRes['ok']);
         self::assertSame('MONSTER', $aaRes['targetType'] ?? null);
         self::assertSame($nearestMob->getId(), $aaRes['targetId'] ?? null);
         self::assertLessThan(500, $nearestMob->getCurrentHp());
         self::assertSame(500, $midMob->getCurrentHp());
 
-        // 2. Offensive skill with a distant out-of-range monster selected automatically switches to the nearest alive monster
+        // 2. Offensive skill with a farther in-range monster (6.5m) or distant monster (30m) selected automatically switches to the nearest alive monster (2.2m)
         $hpBeforeSkill = $nearestMob->getCurrentHp();
-        $skillRes = $this->combat->castSkill($dps, 'ember_strike', 'MONSTER', $farOutMob->getId(), $now + 2.0);
+        $skillRes = $this->combat->castSkill($dps, 'ember_strike', 'MONSTER', $midMob->getId(), $now + 2.0);
         self::assertTrue($skillRes['ok']);
         self::assertSame('MONSTER', $skillRes['targetType'] ?? null);
         self::assertSame($nearestMob->getId(), $skillRes['targetId'] ?? null);
         self::assertLessThan($hpBeforeSkill, $nearestMob->getCurrentHp());
+        self::assertSame(500, $midMob->getCurrentHp());
         self::assertSame(500, $farOutMob->getCurrentHp());
 
-        // 3. Tank SELF_AOE (seismic_slam) also reports the nearest hit monster as targetId
-        $aoeRes = $this->combat->castSkill($tank, 'seismic_slam', null, null, $now + 4.0);
+        // 3. Once the nearest monster (2.2m) dies, the next attack automatically targets the new nearest alive monster ($midMob at 6.5m)
+        $nearestMob->setCurrentHp(0)->setState(MonsterInstance::STATE_DEAD);
+        $this->em->flush();
+
+        $nextAa = $this->combat->performAutoAttack($dps, 'MONSTER', $nearestMob->getId(), $now + 3.5);
+        self::assertTrue($nextAa['ok']);
+        self::assertSame($midMob->getId(), $nextAa['targetId'] ?? null);
+        self::assertLessThan(500, $midMob->getCurrentHp());
+
+        // 4. Tank SELF_AOE (seismic_slam) also reports the nearest alive hit monster as targetId
+        $aoeRes = $this->combat->castSkill($tank, 'seismic_slam', null, null, $now + 5.0);
         self::assertTrue($aoeRes['ok']);
         self::assertSame('MONSTER', $aoeRes['targetType'] ?? null);
-        self::assertSame($nearestMob->getId(), $aoeRes['targetId'] ?? null);
+        self::assertSame($midMob->getId(), $aoeRes['targetId'] ?? null);
     }
 }
