@@ -21,6 +21,7 @@ import { PlayerController } from './PlayerController';
 import { ReunionWorldRenderer } from './ReunionWorldRenderer';
 import { TerrainSampler } from './TerrainSampler';
 import type {
+  AtmosphereState,
   ChatMessageData,
   ClassCode,
   CombatEventData,
@@ -108,8 +109,15 @@ class SymfonyForeverGame {
   private dayCycleSeconds = 720;
   private timeOfDay = 12.0;
   private serverWeather: WeatherCode = 'CLEAR';
-  private overrideTimeOfDay: number | null = null;
-  private overrideWeather: WeatherCode | null = null;
+  private isTimeFrozen = false;
+  private isTimeOverridden = false;
+  private isWeatherOverridden = false;
+  private weatherOverride: WeatherCode | null = null;
+  private adminUnlocked = false;
+  private adminPanelOpen = false;
+  private isDraggingAdminTimeSlider = false;
+  private adminRequestInFlight = false;
+  private lastAdminSliderMinute = -1;
   private lastAtmosphereUiKey = '';
   private readonly playerPosVec = new THREE.Vector3();
 
@@ -166,6 +174,7 @@ class SymfonyForeverGame {
     this.floatingLayer = floating;
     this.characterId = Number(canvas.dataset.characterId ?? 0);
     this.classCode = (canvas.dataset.classCode as ClassCode) || 'TANK';
+    this.adminUnlocked = canvas.dataset.adminUnlocked === '1';
   }
 
   public async boot(): Promise<void> {
@@ -337,11 +346,11 @@ class SymfonyForeverGame {
       this.updateLootDropsFrame(elapsed);
 
       // Update environment, weather, post-processing, VFX, minimap & local cooldown countdowns
-      if (this.overrideTimeOfDay === null) {
+      if (!this.isTimeFrozen) {
         this.timeOfDay = (this.timeOfDay + (dt / Math.max(60, this.dayCycleSeconds)) * 24) % 24;
       }
-      const activeTime = this.overrideTimeOfDay ?? this.timeOfDay;
-      const activeWeather = this.overrideWeather ?? this.serverWeather;
+      const activeTime = this.timeOfDay;
+      const activeWeather = this.serverWeather;
       this.playerPosVec.set(this.controller.x, this.controller.y, this.controller.z);
 
       const camDist = this.camera.position.distanceTo(this.playerPosVec);
@@ -352,6 +361,9 @@ class SymfonyForeverGame {
         ...weatherFactors,
       });
       this.updateAtmosphereHud(activeTime, activeWeather);
+      if (this.adminPanelOpen && !this.isDraggingAdminTimeSlider) {
+        this.syncAdminTimeControls(activeTime);
+      }
       this.vfx.update(dt);
       this.tickLocalCooldowns(dt);
 
@@ -445,17 +457,8 @@ class SymfonyForeverGame {
       this.controller.teleport(resp.self.x, resp.self.y, resp.self.z);
     }
 
-    if (resp.atmosphere) {
-      this.dayCycleSeconds = resp.atmosphere.dayCycleSeconds || 720;
-      this.serverWeather = resp.atmosphere.weather;
-      let diff = resp.atmosphere.timeOfDay - this.timeOfDay;
-      if (diff > 12) diff -= 24;
-      if (diff < -12) diff += 24;
-      if (isFirst || Math.abs(diff) > 0.35) {
-        this.timeOfDay = resp.atmosphere.timeOfDay;
-      } else {
-        this.timeOfDay = (this.timeOfDay + diff * 0.25 + 24) % 24;
-      }
+    if (resp.atmosphere && !this.adminRequestInFlight) {
+      this.applyAtmosphere(resp.atmosphere, isFirst);
     }
 
     // Zone transition atmosphere & banner
@@ -757,6 +760,10 @@ class SymfonyForeverGame {
           this.toggleBagModal(false);
         } else if (this.charModalOpen) {
           this.toggleCharModal(false);
+        } else if (this.targetType !== null) {
+          this.clearTarget();
+        } else if (this.adminPanelOpen) {
+          this.setAdminPanelOpen(false);
         } else {
           this.clearTarget();
         }
@@ -879,12 +886,19 @@ class SymfonyForeverGame {
       chatInput.value = '';
       chatInput.blur();
       if (!text) return;
-      if (this.handleLocalAtmosphereCommand(text)) return;
+      if (this.handleAtmosphereSlashCommand(text)) return;
       const channel = this.activeChatTab === 'COMBAT' ? 'ZONE' : this.activeChatTab;
       const res = await this.net.sendChat(this.characterId, channel, text);
       if (!res.ok) {
         if (res.error) this.showToast(res.error);
         return;
+      }
+      if (res.adminUnlocked || res.command === 'iddad') {
+        this.setAdminUnlocked(true);
+        this.setAdminPanelOpen(true);
+      }
+      if (res.atmosphere) {
+        this.applyAtmosphere(res.atmosphere, true);
       }
       if (res.self) {
         this.selfState = res.self;
@@ -897,6 +911,8 @@ class SymfonyForeverGame {
         this.showToast(res.notice);
       }
     });
+
+    this.setupAdminAtmospherePanel();
 
     // Party controls
     document.getElementById('party-invite-form')?.addEventListener('submit', async (e) => {
@@ -2771,73 +2787,294 @@ class SymfonyForeverGame {
     }
   }
 
-  private handleLocalAtmosphereCommand(raw: string): boolean {
+  private applyAtmosphere(atmo: AtmosphereState, snapImmediately: boolean): void {
+    this.dayCycleSeconds = atmo.dayCycleSeconds || 720;
+    this.serverWeather = atmo.weather;
+    this.isTimeFrozen = Boolean(atmo.isTimeFrozen);
+    this.isTimeOverridden = Boolean(atmo.isTimeOverridden);
+    this.isWeatherOverridden = Boolean(atmo.isWeatherOverridden);
+    this.weatherOverride = atmo.weatherOverride ?? null;
+
+    let diff = atmo.timeOfDay - this.timeOfDay;
+    if (diff > 12) diff -= 24;
+    if (diff < -12) diff += 24;
+    if (snapImmediately || this.isTimeFrozen || Math.abs(diff) > 0.25) {
+      this.timeOfDay = atmo.timeOfDay;
+    } else {
+      this.timeOfDay = (this.timeOfDay + diff * 0.25 + 24) % 24;
+    }
+
+    this.syncAdminPanelUi();
+  }
+
+  private setupAdminAtmospherePanel(): void {
+    this.setAdminUnlocked(this.adminUnlocked);
+
+    document.getElementById('btn-admin-toggle')?.addEventListener('click', () => {
+      if (!this.adminUnlocked) return;
+      this.setAdminPanelOpen(!this.adminPanelOpen);
+    });
+    document.getElementById('hud-atmosphere')?.addEventListener('click', () => {
+      if (!this.adminUnlocked) return;
+      this.setAdminPanelOpen(!this.adminPanelOpen);
+    });
+    document.getElementById('btn-close-admin-panel')?.addEventListener('click', () => {
+      this.setAdminPanelOpen(false);
+    });
+
+    document.querySelectorAll<HTMLButtonElement>('.admin-weather-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const w = btn.dataset.weather as WeatherCode | 'AUTO' | undefined;
+        if (!w) return;
+        void this.applyAdminAtmosphere({ weather: w });
+      });
+    });
+
+    document.querySelectorAll<HTMLButtonElement>('.admin-time-preset').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const h = Number(btn.dataset.time);
+        if (!Number.isFinite(h)) return;
+        void this.applyAdminAtmosphere({ timeOfDay: h });
+      });
+    });
+
+    const slider = document.getElementById('admin-time-slider') as HTMLInputElement | null;
+    if (slider) {
+      slider.addEventListener('input', () => {
+        this.isDraggingAdminTimeSlider = true;
+        const previewHour = Number(slider.value) / 60;
+        const readoutEl = document.getElementById('admin-time-readout');
+        if (readoutEl) {
+          readoutEl.textContent = this.formatAdminTimeReadout(previewHour);
+        }
+      });
+      slider.addEventListener('change', () => {
+        this.isDraggingAdminTimeSlider = false;
+        slider.blur();
+        const targetHour = Number((Number(slider.value) / 60).toFixed(2));
+        void this.applyAdminAtmosphere({ timeOfDay: targetHour });
+      });
+      slider.addEventListener('blur', () => {
+        this.isDraggingAdminTimeSlider = false;
+      });
+    }
+
+    document.getElementById('btn-admin-freeze-time')?.addEventListener('click', () => {
+      void this.applyAdminAtmosphere({ freezeTime: !this.isTimeFrozen });
+    });
+
+    document.getElementById('btn-admin-time-auto')?.addEventListener('click', () => {
+      void this.applyAdminAtmosphere({ timeMode: 'AUTO' });
+    });
+
+    document.getElementById('btn-admin-reset-all')?.addEventListener('click', () => {
+      void this.applyAdminAtmosphere({ action: 'reset' });
+    });
+
+    this.syncAdminPanelUi();
+  }
+
+  private setAdminUnlocked(unlocked: boolean): void {
+    this.adminUnlocked = unlocked;
+    const toggleBtn = document.getElementById('btn-admin-toggle');
+    if (toggleBtn) {
+      toggleBtn.style.display = unlocked ? 'block' : 'none';
+    }
+    const atmoRow = document.getElementById('hud-atmosphere');
+    if (atmoRow) {
+      atmoRow.classList.toggle('admin-clickable', unlocked);
+      atmoRow.title = unlocked
+        ? 'Cycle jour/nuit & météo communs (cliquer pour ouvrir le panneau Admin)'
+        : 'Cycle jour/nuit & météo communs à toute l\'île';
+    }
+  }
+
+  private setAdminPanelOpen(open: boolean): void {
+    this.adminPanelOpen = open && this.adminUnlocked;
+    const panel = document.getElementById('admin-atmosphere-panel');
+    if (panel) {
+      panel.classList.toggle('visible', this.adminPanelOpen);
+    }
+    if (this.adminPanelOpen) {
+      this.lastAdminSliderMinute = -1;
+      this.syncAdminPanelUi();
+    }
+  }
+
+  private async applyAdminAtmosphere(payload: {
+    action?: 'reset';
+    weather?: WeatherCode | 'AUTO' | null;
+    timeMode?: 'AUTO';
+    timeOfDay?: number;
+    freezeTime?: boolean;
+  }): Promise<void> {
+    if (!this.adminUnlocked) {
+      this.showToast('🔒 Tapez /iddad dans le chat pour accéder aux contrôles Admin.');
+      return;
+    }
+
+    this.adminRequestInFlight = true;
+    try {
+      const res = await this.net.updateAdminAtmosphere(payload);
+      if (!res.ok) {
+        this.showToast(res.error ?? 'Impossible de modifier l\'atmosphère globale.');
+        return;
+      }
+      if (res.atmosphere) {
+        this.applyAtmosphere(res.atmosphere, true);
+      }
+      if (res.notice) {
+        this.showToast(res.notice);
+      }
+    } catch {
+      this.showToast('⚠️ Erreur réseau lors de la mise à jour de l\'atmosphère.');
+    } finally {
+      this.adminRequestInFlight = false;
+    }
+  }
+
+  private syncAdminPanelUi(): void {
+    const activeWeatherBtn = this.isWeatherOverridden && this.weatherOverride ? this.weatherOverride : 'AUTO';
+    document.querySelectorAll<HTMLButtonElement>('.admin-weather-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.weather === activeWeatherBtn);
+    });
+
+    const weatherBadge = document.getElementById('admin-weather-mode-badge');
+    if (weatherBadge) {
+      weatherBadge.textContent = this.isWeatherOverridden ? 'Forcée' : 'Auto';
+      weatherBadge.style.color = this.isWeatherOverridden ? '#fde047' : '#5eead4';
+    }
+
+    const timeBadge = document.getElementById('admin-time-mode-badge');
+    if (timeBadge) {
+      timeBadge.classList.remove('overridden', 'frozen');
+      if (this.isTimeFrozen) {
+        timeBadge.textContent = 'Figée';
+        timeBadge.classList.add('frozen');
+      } else if (this.isTimeOverridden) {
+        timeBadge.textContent = 'Modifiée';
+        timeBadge.classList.add('overridden');
+      } else {
+        timeBadge.textContent = 'Auto';
+      }
+    }
+
+    const freezeBtn = document.getElementById('btn-admin-freeze-time');
+    if (freezeBtn) {
+      freezeBtn.textContent = this.isTimeFrozen ? '▶️ Reprendre' : '⏸️ Figer l\'heure';
+      freezeBtn.classList.toggle('active', this.isTimeFrozen);
+    }
+
+    if (!this.isDraggingAdminTimeSlider) {
+      this.syncAdminTimeControls(this.timeOfDay, true);
+    }
+  }
+
+  private syncAdminTimeControls(timeOfDay: number, force = false): void {
+    const wrappedMinutes = Math.floor(((timeOfDay % 24) + 24) % 24 * 60) % 1440;
+    if (!force && wrappedMinutes === this.lastAdminSliderMinute) return;
+    this.lastAdminSliderMinute = wrappedMinutes;
+
+    const slider = document.getElementById('admin-time-slider') as HTMLInputElement | null;
+    if (slider) {
+      slider.value = String(wrappedMinutes);
+    }
+    const readoutEl = document.getElementById('admin-time-readout');
+    if (readoutEl) {
+      readoutEl.textContent = this.formatAdminTimeReadout(timeOfDay);
+    }
+  }
+
+  private formatAdminTimeReadout(timeOfDay: number): string {
+    const wrapped = ((timeOfDay % 24) + 24) % 24;
+    const totalMins = Math.floor(wrapped * 60);
+    const hh = String(Math.floor(totalMins / 60) % 24).padStart(2, '0');
+    const mm = String(totalMins % 60).padStart(2, '0');
+    const phaseLabel =
+      wrapped >= 5.5 && wrapped < 7.5
+        ? 'Aube'
+        : wrapped >= 7.5 && wrapped < 17.0
+          ? 'Jour'
+          : wrapped >= 17.0 && wrapped < 19.5
+            ? 'Crépuscule'
+            : 'Nuit';
+    return `${hh}:${mm} · ${phaseLabel}`;
+  }
+
+  private handleAtmosphereSlashCommand(raw: string): boolean {
     const parts = raw.trim().toLowerCase().split(/\s+/);
     const cmd = parts[0];
     const arg = parts[1] ?? '';
 
+    if (cmd !== '/time' && cmd !== '/meteo') {
+      return false;
+    }
+
+    if (!this.adminUnlocked) {
+      this.showToast('🔒 Cycle jour/nuit et météo partagés : tapez /iddad pour ouvrir le panneau admin.');
+      return true;
+    }
+
     if (cmd === '/time') {
       if (arg === 'auto' || arg === '') {
-        this.overrideTimeOfDay = null;
-        this.showToast('🕒 Cycle jour/nuit synchronisé sur l\'horloge serveur.');
+        void this.applyAdminAtmosphere({ timeMode: 'AUTO' });
+        return true;
+      }
+      if (arg === 'figer' || arg === 'pause' || arg === 'freeze') {
+        void this.applyAdminAtmosphere({ freezeTime: true });
+        return true;
+      }
+      if (arg === 'reprendre' || arg === 'play' || arg === 'resume') {
+        void this.applyAdminAtmosphere({ freezeTime: false });
         return true;
       }
       const presets: Record<string, number> = {
-        aube: 6.4,
-        dawn: 6.4,
+        aube: 6.35,
+        dawn: 6.35,
         jour: 12.5,
         midi: 12.5,
         day: 12.5,
         soir: 18.35,
         crepuscule: 18.35,
         dusk: 18.35,
-        nuit: 22.5,
-        night: 22.5,
+        nuit: 23.0,
+        night: 23.0,
       };
       let target = presets[arg];
       if (target === undefined) {
         const parsed = Number(arg);
         if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 24) {
-          this.showToast('Usage : /time <aube|jour|soir|nuit|auto|0-23>');
+          this.showToast('Usage : /time <aube|jour|soir|nuit|auto|figer|reprendre|0-23>');
           return true;
         }
         target = parsed;
       }
-      this.overrideTimeOfDay = target;
-      const hh = String(Math.floor(target)).padStart(2, '0');
-      const mm = String(Math.floor((target % 1) * 60)).padStart(2, '0');
-      this.showToast(`🕒 Heure forcée à ${hh}:${mm} (/time auto pour réinitialiser).`);
+      void this.applyAdminAtmosphere({ timeOfDay: target });
       return true;
     }
 
-    if (cmd === '/meteo') {
-      if (arg === 'auto' || arg === '') {
-        this.overrideWeather = null;
-        this.showToast('🌦️ Météo synchronisée sur le biome de la zone.');
-        return true;
-      }
-      const weatherMap: Record<string, { code: WeatherCode; label: string }> = {
-        clair: { code: 'CLEAR', label: 'Ciel clair' },
-        clear: { code: 'CLEAR', label: 'Ciel clair' },
-        pluie: { code: 'RAIN', label: 'Pluie tropicale' },
-        rain: { code: 'RAIN', label: 'Pluie tropicale' },
-        orage: { code: 'STORM', label: 'Orage tropical' },
-        storm: { code: 'STORM', label: 'Orage tropical' },
-        sable: { code: 'SANDSTORM', label: 'Tempête de sable' },
-        sand: { code: 'SANDSTORM', label: 'Tempête de sable' },
-        sandstorm: { code: 'SANDSTORM', label: 'Tempête de sable' },
-      };
-      const picked = weatherMap[arg];
-      if (!picked) {
-        this.showToast('Usage : /meteo <clair|pluie|orage|sable|auto>');
-        return true;
-      }
-      this.overrideWeather = picked.code;
-      this.showToast(`🌦️ Météo : ${picked.label} (/meteo auto pour réinitialiser).`);
+    if (arg === 'auto' || arg === '') {
+      void this.applyAdminAtmosphere({ weather: 'AUTO' });
       return true;
     }
-
-    return false;
+    const weatherMap: Record<string, WeatherCode> = {
+      clair: 'CLEAR',
+      clear: 'CLEAR',
+      pluie: 'RAIN',
+      rain: 'RAIN',
+      orage: 'STORM',
+      storm: 'STORM',
+      sable: 'SANDSTORM',
+      sand: 'SANDSTORM',
+      sandstorm: 'SANDSTORM',
+    };
+    const picked = weatherMap[arg];
+    if (!picked) {
+      this.showToast('Usage : /meteo <clair|pluie|orage|sable|auto>');
+      return true;
+    }
+    void this.applyAdminAtmosphere({ weather: picked });
+    return true;
   }
 
   private updateAtmosphereHud(timeOfDay: number, weather: WeatherCode): void {
@@ -2855,13 +3092,14 @@ class SymfonyForeverGame {
       SANDSTORM: { icon: '🌪️ ', label: 'Tempête de sable' },
     };
     const wInfo = weatherMeta[weather];
-    const key = `${hh}:${mm}|${timeIcon}|${weather}`;
+    const frozenSuffix = this.isTimeFrozen ? ' ⏸️' : '';
+    const key = `${hh}:${mm}|${timeIcon}|${weather}|${frozenSuffix}`;
     if (key === this.lastAtmosphereUiKey) return;
     this.lastAtmosphereUiKey = key;
 
     const el = document.getElementById('hud-atmosphere');
     if (!el) return;
-    el.innerHTML = `<span>${timeIcon} ${hh}:${mm}</span><span>${wInfo.icon}${wInfo.label}</span>`;
+    el.innerHTML = `<span>${timeIcon} ${hh}:${mm}${frozenSuffix}</span><span>${wInfo.icon}${wInfo.label}</span>`;
   }
 
   private showToast(msg: string): void {

@@ -230,4 +230,159 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         $contents = array_column($sync3['chat'], 'content');
         self::assertNotContains('/iddad', $contents);
     }
+
+    public function testSharedAtmosphereAndIddadAdminPanelApi(): void
+    {
+        $lagon = WorldCatalog::zones()['lagon_ouest'];
+        $fournaise = WorldCatalog::zones()['fournaise'];
+
+        $user1 = (new User())->setUsername('atmo_admin')->setEmail('admin@reunion.re')->setPassword('unused');
+        $user2 = (new User())->setUsername('atmo_peer')->setEmail('peer@reunion.re')->setPassword('unused');
+        $this->em->persist($user1);
+        $this->em->persist($user2);
+
+        $char1 = (new Character($user1, 'LagonScout', CharacterClass::DPS))
+            ->setPosX($lagon['respawnX'])->setPosY(12.0)->setPosZ($lagon['respawnZ'])->setZoneCode('lagon_ouest');
+        $char2 = (new Character($user2, 'VolcanoWalker', CharacterClass::HEAL))
+            ->setPosX($fournaise['respawnX'])->setPosY(42.0)->setPosZ($fournaise['respawnZ'])->setZoneCode('fournaise');
+
+        $stats = self::getContainer()->get(StatCalculator::class);
+        $s1 = $stats->compute($char1);
+        $s2 = $stats->compute($char2);
+        $char1->setCurrentHp($s1['maxHp'])->setCurrentMp($s1['maxMp']);
+        $char2->setCurrentHp($s2['maxHp'])->setCurrentMp($s2['maxMp']);
+
+        $this->em->persist($char1);
+        $this->em->persist($char2);
+        $this->em->flush();
+
+        // 1. Before /iddad, admin endpoint is forbidden (403) and initial atmosphere is shared between zones
+        $this->client->loginUser($user1);
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'weather' => 'STORM',
+        ]));
+        self::assertResponseStatusCodeSame(403);
+
+        $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char1->getId(),
+            'x' => $lagon['respawnX'],
+            'z' => $lagon['respawnZ'],
+        ]));
+        self::assertResponseIsSuccessful();
+        $sync1 = json_decode((string) $this->client->getResponse()->getContent(), true);
+
+        $this->client->getCookieJar()->clear();
+        $this->client->loginUser($user2);
+        $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char2->getId(),
+            'x' => $fournaise['respawnX'],
+            'z' => $fournaise['respawnZ'],
+        ]));
+        self::assertResponseIsSuccessful();
+        $sync2 = json_decode((string) $this->client->getResponse()->getContent(), true);
+
+        self::assertSame($sync1['atmosphere']['weather'], $sync2['atmosphere']['weather']);
+        self::assertEqualsWithDelta($sync1['atmosphere']['timeOfDay'], $sync2['atmosphere']['timeOfDay'], 0.05);
+        self::assertFalse($sync2['atmosphere']['isWeatherOverridden']);
+        self::assertFalse($sync2['atmosphere']['isTimeFrozen']);
+
+        // 2. User 1 sends /iddad -> unlocks admin panel & returns current shared atmosphere
+        $this->client->getCookieJar()->clear();
+        $this->client->loginUser($user1);
+        $this->client->request('POST', '/api/chat/send', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char1->getId(),
+            'channel' => 'ZONE',
+            'content' => '/iddad',
+        ]));
+        self::assertResponseIsSuccessful();
+        $iddadResp = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertTrue($iddadResp['ok']);
+        self::assertTrue($iddadResp['adminUnlocked']);
+        self::assertIsArray($iddadResp['atmosphere']);
+
+        // Play view reflects unlocked admin panel attribute in HTML
+        $this->client->request('GET', '/play/'.$char1->getId());
+        self::assertResponseIsSuccessful();
+        $html = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('data-admin-unlocked="1"', $html);
+        self::assertStringContainsString('id="admin-atmosphere-panel"', $html);
+
+        // 3. User 1 updates global weather and freezes global time at 23:00
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'weather' => 'SANDSTORM',
+            'timeOfDay' => 23.0,
+            'freezeTime' => true,
+        ]));
+        self::assertResponseIsSuccessful();
+        $upd = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertTrue($upd['ok']);
+        self::assertSame('SANDSTORM', $upd['atmosphere']['weather']);
+        self::assertEqualsWithDelta(23.0, $upd['atmosphere']['timeOfDay'], 0.01);
+        self::assertTrue($upd['atmosphere']['isNight']);
+        self::assertTrue($upd['atmosphere']['isTimeFrozen']);
+        self::assertTrue($upd['atmosphere']['isWeatherOverridden']);
+
+        // Validation check (422) on invalid weather / hour
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'weather' => 'BLIZZARD',
+        ]));
+        self::assertResponseStatusCodeSame(422);
+
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'timeOfDay' => 25.0,
+        ]));
+        self::assertResponseStatusCodeSame(422);
+
+        // 4. User 2 in Fournaise immediately receives SANDSTORM & frozen 23:00, and still cannot call admin endpoint
+        $this->client->loginUser($user2);
+        $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char2->getId(),
+            'x' => $fournaise['respawnX'],
+            'z' => $fournaise['respawnZ'],
+        ]));
+        self::assertResponseIsSuccessful();
+        $peerSync = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertSame('SANDSTORM', $peerSync['atmosphere']['weather']);
+        self::assertEqualsWithDelta(23.0, $peerSync['atmosphere']['timeOfDay'], 0.01);
+        self::assertTrue($peerSync['atmosphere']['isNight']);
+        self::assertTrue($peerSync['atmosphere']['isTimeFrozen']);
+        self::assertTrue($peerSync['atmosphere']['isWeatherOverridden']);
+
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'weather' => 'CLEAR',
+        ]));
+        self::assertResponseStatusCodeSame(403);
+
+        // 5. User 1 unfreezes and resets all overrides to auto -> User 2 returns to automatic shared atmosphere
+        $this->client->loginUser($user1);
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'freezeTime' => false,
+        ]));
+        self::assertResponseIsSuccessful();
+        $unfreeze = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertFalse($unfreeze['atmosphere']['isTimeFrozen']);
+        self::assertTrue($unfreeze['atmosphere']['isTimeOverridden']);
+
+        $this->client->request('POST', '/api/admin/atmosphere', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'action' => 'reset',
+        ]));
+        self::assertResponseIsSuccessful();
+        $reset = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertFalse($reset['atmosphere']['isWeatherOverridden']);
+        self::assertFalse($reset['atmosphere']['isTimeOverridden']);
+        self::assertFalse($reset['atmosphere']['isTimeFrozen']);
+
+        $this->client->getCookieJar()->clear();
+        $this->client->loginUser($user2);
+        $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
+            'characterId' => $char2->getId(),
+            'x' => $fournaise['respawnX'],
+            'z' => $fournaise['respawnZ'],
+        ]));
+        self::assertResponseIsSuccessful();
+        $peerResetSync = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertFalse($peerResetSync['atmosphere']['isWeatherOverridden']);
+        self::assertFalse($peerResetSync['atmosphere']['isTimeOverridden']);
+        self::assertFalse($peerResetSync['atmosphere']['isTimeFrozen']);
+    }
 }

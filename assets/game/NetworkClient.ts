@@ -1,4 +1,12 @@
-import type { InventoryStatePayload, ManifestResponse, QuestStatePayload, SelfState, SyncResponse } from './types';
+import type {
+  AtmosphereState,
+  InventoryStatePayload,
+  ManifestResponse,
+  QuestStatePayload,
+  SelfState,
+  SyncResponse,
+  WeatherCode,
+} from './types';
 
 export type SyncOutcome =
   | { status: 'ok'; data: SyncResponse }
@@ -265,7 +273,9 @@ export class NetworkClient {
     ok: boolean;
     error?: string;
     command?: string;
+    adminUnlocked?: boolean;
     notice?: string;
+    atmosphere?: AtmosphereState;
     self?: SelfState;
     inventory?: InventoryStatePayload;
   }> {
@@ -279,10 +289,28 @@ export class NetworkClient {
       ok: boolean;
       error?: string;
       command?: string;
+      adminUnlocked?: boolean;
       notice?: string;
+      atmosphere?: AtmosphereState;
       self?: SelfState;
       inventory?: InventoryStatePayload;
     };
+  }
+
+  public async updateAdminAtmosphere(payload: {
+    action?: 'reset';
+    weather?: WeatherCode | 'AUTO' | null;
+    timeMode?: 'AUTO';
+    timeOfDay?: number;
+    freezeTime?: boolean;
+  }): Promise<{ ok: boolean; error?: string; notice?: string; atmosphere?: AtmosphereState }> {
+    const res = await fetch('/api/admin/atmosphere', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return (await res.json()) as { ok: boolean; error?: string; notice?: string; atmosphere?: AtmosphereState };
   }
 
   public async partyAction(

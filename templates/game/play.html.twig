@@ -163,6 +163,56 @@
         background: rgba(15, 29, 44, 0.78); border: 1px solid rgba(94, 234, 212, 0.28);
         color: #e2e8f0;
     }
+    .atmo-row.admin-clickable { cursor: pointer; }
+    .atmo-row.admin-clickable:hover { border-color: rgba(250, 204, 21, 0.6); background: rgba(24, 42, 62, 0.88); }
+
+    /* Floating Admin Atmosphere Panel (/iddad) */
+    #admin-atmosphere-panel {
+        position: absolute; top: 14px; left: 306px; width: 292px; padding: 11px 12px;
+        display: none; z-index: 32;
+        background: linear-gradient(180deg, rgba(16, 26, 40, 0.94), rgba(9, 17, 27, 0.94));
+        border: 1px solid rgba(250, 204, 21, 0.52);
+        box-shadow: 0 14px 36px rgba(0, 0, 0, 0.6), 0 0 22px rgba(250, 204, 21, 0.12);
+    }
+    #admin-atmosphere-panel.visible { display: flex; flex-direction: column; gap: 10px; }
+    .admin-panel-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .admin-panel-title { font-weight: 800; font-size: 12.5px; color: #fde047; display: flex; align-items: center; gap: 5px; }
+    .admin-panel-badge {
+        font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: 999px;
+        background: rgba(94, 234, 212, 0.16); border: 1px solid rgba(94, 234, 212, 0.45); color: #99f6e4;
+    }
+    .admin-section-label {
+        font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: #93adc2; font-weight: 700; margin-bottom: 5px;
+        display: flex; justify-content: space-between; align-items: center;
+    }
+    .admin-btn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+    .admin-preset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .admin-btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .admin-btn {
+        padding: 5px 6px; border-radius: 7px; border: 1px solid rgba(148, 189, 224, 0.25);
+        background: rgba(15, 29, 44, 0.85); color: #e2e8f0; cursor: pointer;
+        font-size: 11px; font-weight: 600; text-align: center; transition: background 0.12s ease, border-color 0.12s ease;
+    }
+    .admin-btn:hover { background: rgba(56, 189, 248, 0.2); border-color: rgba(94, 234, 212, 0.55); }
+    .admin-btn.active {
+        background: rgba(250, 204, 21, 0.22); border-color: #facc15; color: #fef08a;
+        box-shadow: 0 0 10px rgba(250, 204, 21, 0.28);
+    }
+    .admin-btn.warn { background: rgba(234, 88, 12, 0.22); border-color: rgba(251, 146, 60, 0.55); color: #fed7aa; }
+    .admin-btn.warn.active { background: rgba(239, 68, 68, 0.28); border-color: #f87171; color: #fecaca; }
+    .admin-time-readout-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; }
+    #admin-time-readout { font-weight: 700; color: #fef3c7; }
+    #admin-time-mode-badge {
+        font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+        background: rgba(148, 163, 184, 0.2); border: 1px solid rgba(148, 163, 184, 0.4); color: #cbd5e1;
+    }
+    #admin-time-mode-badge.overridden { background: rgba(250, 204, 21, 0.18); border-color: rgba(250, 204, 21, 0.55); color: #fde047; }
+    #admin-time-mode-badge.frozen { background: rgba(239, 68, 68, 0.22); border-color: rgba(248, 113, 113, 0.65); color: #fecaca; }
+    #admin-time-slider { width: 100%; accent-color: #facc15; cursor: pointer; margin: 2px 0 6px; }
+    @media (max-width: 1150px) {
+        #admin-atmosphere-panel { left: 14px; top: auto; bottom: 230px; }
+    }
     .travel-row { display: flex; gap: 4px; }
     .travel-row select {
         flex: 1; min-width: 0; background: rgba(5,13,21,0.85); color: #e2e8f0;
@@ -372,7 +422,8 @@
 <canvas id="game-viewport"
         data-character-id="{{ character.id }}"
         data-character-name="{{ character.name|e('html_attr') }}"
-        data-class-code="{{ character.classCode }}"></canvas>
+        data-class-code="{{ character.classCode }}"
+        data-admin-unlocked="{{ adminUnlocked|default(false) ? '1' : '0' }}"></canvas>
 
 <div id="floating-layer"></div>
 
@@ -413,6 +464,49 @@
                 <button type="submit" class="mini-btn">+ Inviter</button>
             </form>
         </div>
+    </div>
+
+    <!-- Admin Atmosphere Floating Panel (/iddad) -->
+    <div class="hud-box" id="admin-atmosphere-panel">
+        <div class="admin-panel-head">
+            <div class="admin-panel-title">🛠️ Admin Atmosphère</div>
+            <div style="display:flex; align-items:center; gap:5px;">
+                <span class="admin-panel-badge">Commun · Toute l'île</span>
+                <button type="button" class="mini-btn" id="btn-close-admin-panel" title="Fermer le panneau">×</button>
+            </div>
+        </div>
+        <div>
+            <div class="admin-section-label">
+                <span>🌦️ Météo globale</span>
+                <span id="admin-weather-mode-badge" style="color:#5eead4;">Auto</span>
+            </div>
+            <div class="admin-btn-grid">
+                <button type="button" class="admin-btn admin-weather-btn" data-weather="AUTO">✨ Auto</button>
+                <button type="button" class="admin-btn admin-weather-btn" data-weather="CLEAR">☀️ Clair</button>
+                <button type="button" class="admin-btn admin-weather-btn" data-weather="RAIN">🌧️ Pluie</button>
+                <button type="button" class="admin-btn admin-weather-btn" data-weather="STORM">⛈️ Orage</button>
+                <button type="button" class="admin-btn admin-weather-btn" data-weather="SANDSTORM">🌪️ Sable</button>
+            </div>
+        </div>
+        <div>
+            <div class="admin-section-label"><span>🕒 Cycle Jour / Nuit global</span></div>
+            <div class="admin-time-readout-row">
+                <span id="admin-time-readout">12:00 · Jour</span>
+                <span id="admin-time-mode-badge">Auto</span>
+            </div>
+            <input type="range" id="admin-time-slider" min="0" max="1439" step="5" value="720" aria-label="Heure globale de l'île">
+            <div class="admin-preset-grid" style="margin-bottom:6px;">
+                <button type="button" class="admin-btn admin-time-preset" data-time="6.35">🌅 Aube</button>
+                <button type="button" class="admin-btn admin-time-preset" data-time="12.5">☀️ Midi</button>
+                <button type="button" class="admin-btn admin-time-preset" data-time="18.35">🌇 Soir</button>
+                <button type="button" class="admin-btn admin-time-preset" data-time="23">🌙 Nuit</button>
+            </div>
+            <div class="admin-btn-row">
+                <button type="button" class="admin-btn warn" id="btn-admin-freeze-time">⏸️ Figer l'heure</button>
+                <button type="button" class="admin-btn" id="btn-admin-time-auto">🔄 Heure Auto</button>
+            </div>
+        </div>
+        <button type="button" class="admin-btn" id="btn-admin-reset-all" style="border-color:rgba(94,234,212,0.45); color:#99f6e4;">♻️ Tout remettre en Auto</button>
     </div>
 
     <!-- Top Center: Target & World Boss Raid Bar -->
@@ -458,10 +552,11 @@
                 <span>🌋 Dolomieu</span>
                 <strong id="wb-minimap-status">Actif</strong>
             </div>
-            <div class="atmo-row" id="hud-atmosphere" title="Cycle jour/nuit &amp; météo de la zone (/time, /meteo)">
+            <div class="atmo-row" id="hud-atmosphere" title="Cycle jour/nuit &amp; météo communs à toute l'île">
                 <span>☀️ 12:00</span>
                 <span>Ciel clair</span>
             </div>
+            <button type="button" class="mini-btn" id="btn-admin-toggle" style="display:none; width:100%;" title="Ouvrir / fermer le panneau Admin Atmosphère">🛠️ Admin Météo / Heure</button>
             <div class="travel-row">
                 <select id="travel-select" title="Relais des Cirques (Voyage rapide hors combat)"></select>
                 <button type="button" class="mini-btn" id="btn-travel">Voyager</button>

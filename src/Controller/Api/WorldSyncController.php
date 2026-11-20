@@ -8,7 +8,6 @@ use App\Entity\Character;
 use App\Entity\User;
 use App\Game\ItemRegistry;
 use App\Game\MonsterRespawnScaler;
-use App\Game\WorldAtmosphere;
 use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
@@ -20,6 +19,7 @@ use App\Service\Game\InventoryService;
 use App\Service\Game\QuestService;
 use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatePayloadBuilder;
+use App\Service\Game\WorldAtmosphereService;
 use App\Service\Game\WorldSimulationService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -48,6 +48,7 @@ final class WorldSyncController extends AbstractController
         InventoryService $inventoryService,
         ItemRegistry $itemRegistry,
         StatePayloadBuilder $payloadBuilder,
+        WorldAtmosphereService $atmosphereService,
     ): JsonResponse {
         /** @var User $user */
         $user = $this->getUser();
@@ -192,7 +193,7 @@ final class WorldSyncController extends AbstractController
             'onlineCount' => $characterRepository->countOnline($now),
             'zonePlayerCount' => $zonePlayerCount,
             'respawnMultiplier' => $respawnMultiplier,
-            'atmosphere' => WorldAtmosphere::compute($zoneCode, $now),
+            'atmosphere' => $atmosphereService->getCurrentAtmosphere($now),
             'self' => $payloadBuilder->buildSelf($character, $now),
             'zone' => WorldCatalog::zones()[$zoneCode] ?? WorldCatalog::zones()['lagon_ouest'],
             'players' => array_map(

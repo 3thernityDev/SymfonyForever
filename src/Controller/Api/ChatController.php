@@ -12,6 +12,7 @@ use App\Service\Game\BotSimulationService;
 use App\Service\Game\InventoryService;
 use App\Service\Game\LevelingService;
 use App\Service\Game\StatePayloadBuilder;
+use App\Service\Game\WorldAtmosphereService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -28,6 +29,7 @@ final class ChatController extends AbstractController
         InventoryService $inventoryService,
         LevelingService $levelingService,
         StatePayloadBuilder $payloadBuilder,
+        WorldAtmosphereService $atmosphereService,
         EntityManagerInterface $em,
     ): JsonResponse {
         /** @var User $user */
@@ -52,15 +54,19 @@ final class ChatController extends AbstractController
             $levelResult = $levelingService->promoteToLevel($character, LevelingService::MAX_LEVEL);
             $em->flush();
 
+            AdminAtmosphereController::grantSessionAdmin($request, $user);
+
             $now = microtime(true);
             $notice = $levelResult['levelsGained'] > 0
-                ? '🪙 Code secret activé ! +1 000 000 Or et passage au niveau 60 !'
-                : '🪙 Code secret activé ! +1 000 000 Or ajoutés à votre bourse (déjà niveau 60).';
+                ? '🪙 Code secret activé ! +1 000 000 Or, niveau 60 et panneau Admin Atmosphère ouvert !'
+                : '🪙 Code secret activé ! +1 000 000 Or et panneau Admin Atmosphère ouvert.';
 
             return $this->json([
                 'ok' => true,
                 'command' => 'iddad',
+                'adminUnlocked' => true,
                 'notice' => $notice,
+                'atmosphere' => $atmosphereService->getCurrentAtmosphere($now),
                 'self' => $payloadBuilder->buildSelf($character, $now),
                 'inventory' => $inventoryService->buildInventoryState($character),
             ]);

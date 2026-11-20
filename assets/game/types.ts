@@ -9,6 +9,10 @@ export interface AtmosphereState {
   weather: WeatherCode;
   weatherLabel: string;
   dayCycleSeconds: number;
+  isTimeFrozen?: boolean;
+  isTimeOverridden?: boolean;
+  isWeatherOverridden?: boolean;
+  weatherOverride?: WeatherCode | null;
 }
 
 export interface ClassMeta {

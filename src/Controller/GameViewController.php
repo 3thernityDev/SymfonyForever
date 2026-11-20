@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Controller\Api\AdminAtmosphereController;
 use App\Entity\Character;
 use App\Entity\User;
 use App\Repository\CharacterRepository;
@@ -11,6 +12,7 @@ use App\Repository\MonsterInstanceRepository;
 use App\Repository\ZoneRepository;
 use App\Service\Game\WorldSeederService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
@@ -19,6 +21,7 @@ final class GameViewController extends AbstractController
     #[Route('/play/{id}', name: 'app_play', methods: ['GET'])]
     public function play(
         int $id,
+        Request $request,
         CharacterRepository $characterRepository,
         ZoneRepository $zoneRepository,
         MonsterInstanceRepository $monsterRepository,
@@ -39,6 +42,7 @@ final class GameViewController extends AbstractController
 
         return $this->render('game/play.html.twig', [
             'character' => $character,
+            'adminUnlocked' => AdminAtmosphereController::isSessionAdmin($request, $user),
         ]);
     }
 }
