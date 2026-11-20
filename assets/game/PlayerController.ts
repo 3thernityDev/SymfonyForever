@@ -205,7 +205,7 @@ export class PlayerController {
         if (this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyX')) ascend -= 1;
       }
       if (ascend !== 0) {
-        this.y += ascend * 18.0 * dt;
+        this.y += ascend * 36.0 * dt;
         if (ascend > 0) this.isMoving = true;
       }
       const minFlyY = Math.max(groundY, 7.2);

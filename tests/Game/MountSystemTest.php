@@ -69,12 +69,12 @@ final class MountSystemTest extends WebTestCase
         self::assertNotNull($m2);
         self::assertNotNull($m3);
 
-        // Speeds & flight flags: +60% ground, +100% ground, +100% flying (max level)
-        self::assertSame(0.60, $m1->mountSpeedBonus);
+        // Speeds & flight flags: doubled total speed across all 3 mounts (3.2x ground, 4.0x ground, 4.0x flying)
+        self::assertSame(2.20, $m1->mountSpeedBonus);
         self::assertFalse($m1->mountCanFly);
-        self::assertSame(1.00, $m2->mountSpeedBonus);
+        self::assertSame(3.00, $m2->mountSpeedBonus);
         self::assertFalse($m2->mountCanFly);
-        self::assertSame(1.00, $m3->mountSpeedBonus);
+        self::assertSame(3.00, $m3->mountSpeedBonus);
         self::assertTrue($m3->mountCanFly);
 
         // Escalating prices: 200 < 500 < 1000, flying locked to Level 60
@@ -186,24 +186,26 @@ final class MountSystemTest extends WebTestCase
         self::assertTrue($mOn['ok']);
         self::assertTrue($mOn['mounted']);
         self::assertSame('mount_sol_100', $mOn['self']['activeMountCode']);
-        self::assertSame(1.0, (float) $mOn['self']['mountSpeedBonus']);
+        self::assertSame(3.0, (float) $mOn['self']['mountSpeedBonus']);
         self::assertFalse($mOn['self']['mountCanFly']);
 
-        // 3. Server sync accepts +100% ground mount movement speed without rubber-banding
+        // 3. Server sync accepts doubled +300% (4.0x) ground mount movement speed without rubber-banding
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $fresh = $em->find(Character::class, $rider->getId());
         self::assertInstanceOf(Character::class, $fresh);
         $fresh->setLastSeenAt(microtime(true) - 1.0);
         $em->flush();
 
-        // Pick a walkable point ~32 units away (exceeds on-foot 24 u/s limit, allowed at 48 u/s mounted)
+        // Pick a walkable point ~64 units away (exceeds previous 48 u/s limit, allowed at 96 u/s doubled speed)
         $dest = null;
-        for ($ang = 0; $ang < 360; $ang += 15) {
-            $cx = $safeHub['x'] + cos(deg2rad((float) $ang)) * 32.0;
-            $cz = $safeHub['z'] + sin(deg2rad((float) $ang)) * 32.0;
-            if ($this->terrain->isWalkable($cx, $cz)) {
-                $dest = [$cx, $cz];
-                break;
+        foreach ([64.0, 60.0, 56.0] as $radius) {
+            for ($ang = 0; $ang < 360; $ang += 15) {
+                $cx = $safeHub['x'] + cos(deg2rad((float) $ang)) * $radius;
+                $cz = $safeHub['z'] + sin(deg2rad((float) $ang)) * $radius;
+                if ($this->terrain->isWalkable($cx, $cz)) {
+                    $dest = [$cx, $cz];
+                    break 2;
+                }
             }
         }
         self::assertNotNull($dest);
@@ -279,18 +281,18 @@ final class MountSystemTest extends WebTestCase
         ]));
         self::assertResponseStatusCodeSame(422);
 
-        // Fly out above unwalkable deep ocean (-3400, -3400) & high altitude
+        // Fly out above unwalkable deep ocean (-3400, -3400) & doubled +36 u/s climb + high horizontal flight speed
         $em3 = self::getContainer()->get(EntityManagerInterface::class);
         $r3 = $em3->find(Character::class, $rider->getId());
         self::assertInstanceOf(Character::class, $r3);
-        $r3->setPosX(-3380.0)->setPosZ(-3380.0)->setPosY(120.0)->setLastSeenAt(microtime(true) - 1.0);
+        $r3->setPosX(-3350.0)->setPosZ(-3350.0)->setPosY(120.0)->setLastSeenAt(microtime(true) - 1.0);
         $em3->flush();
 
         self::assertFalse($this->terrain->isWalkable(-3400.0, -3400.0));
         $this->client->request('POST', '/api/world/sync', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([
             'characterId' => $rider->getId(),
             'x' => -3400.0,
-            'y' => 138.0,
+            'y' => 156.0,
             'z' => -3400.0,
             'rotY' => 1.0,
             'isMoving' => true,
@@ -300,7 +302,7 @@ final class MountSystemTest extends WebTestCase
         self::assertResponseIsSuccessful();
         $syncFly = json_decode((string) $this->client->getResponse()->getContent(), true);
         self::assertFalse($syncFly['correctedPosition']);
-        self::assertEqualsWithDelta(138.0, $syncFly['self']['y'], 0.2);
+        self::assertEqualsWithDelta(156.0, $syncFly['self']['y'], 0.2);
 
         // Dismounting over deep ocean is refused, over walkable land succeeds
         $this->client->request('POST', '/api/character/mount/toggle', [], [], ['CONTENT_TYPE' => 'application/json'], json_encode([

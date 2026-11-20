@@ -533,11 +533,11 @@ final class ItemRegistry
                 bonuses: ['vitality' => 38, 'intelligence' => 40, 'strength' => 35, 'defense' => 26, 'spirit' => 32],
             ),
 
-            // ================= MONTURES (Sol +60%, Sol +100%, Volante +100% Niv. 60) =================
+            // ================= MONTURES (Sol +220%, Sol +300%, Volante +300% Niv. 60) =================
             new ItemDefinition(
                 code: 'mount_sol_60',
-                name: 'Poney des Plaines (+60%)',
-                description: 'Monture robuste de la Plaine des Cafres augmentant votre vitesse au sol de +60%. Utilisable avec [C].',
+                name: 'Poney des Plaines (+220%)',
+                description: 'Monture robuste de la Plaine des Cafres augmentant votre vitesse au sol de +220% (vitesse ×3,2). Utilisable avec [C].',
                 type: ItemDefinition::TYPE_EQUIPMENT,
                 slot: ItemDefinition::SLOT_MOUNT,
                 rarity: ItemDefinition::RARITY_UNCOMMON,
@@ -546,13 +546,13 @@ final class ItemRegistry
                 sellPrice: 50,
                 buyPrice: 200,
                 stackable: false,
-                mountSpeedBonus: 0.60,
+                mountSpeedBonus: 2.20,
                 mountCanFly: false,
             ),
             new ItemDefinition(
                 code: 'mount_sol_100',
-                name: 'Destrier du Basalte (+100%)',
-                description: 'Monture d\'élite des cirques augmentant votre vitesse au sol de +100%. Utilisable avec [C].',
+                name: 'Destrier du Basalte (+300%)',
+                description: 'Monture d\'élite des cirques augmentant votre vitesse au sol de +300% (vitesse ×4). Utilisable avec [C].',
                 type: ItemDefinition::TYPE_EQUIPMENT,
                 slot: ItemDefinition::SLOT_MOUNT,
                 rarity: ItemDefinition::RARITY_RARE,
@@ -561,13 +561,13 @@ final class ItemRegistry
                 sellPrice: 125,
                 buyPrice: 500,
                 stackable: false,
-                mountSpeedBonus: 1.00,
+                mountSpeedBonus: 3.00,
                 mountCanFly: false,
             ),
             new ItemDefinition(
                 code: 'mount_vol_100',
-                name: 'Paille-en-Queue Royal (Vol +100%)',
-                description: 'Monture aérienne mythique réservée aux champions de niveau maximum (Niv. 60) : survole toute La Réunion à +100% avec [Espace] / [Ctrl].',
+                name: 'Paille-en-Queue Royal (Vol +300%)',
+                description: 'Monture aérienne mythique réservée aux champions de niveau maximum (Niv. 60) : survole toute La Réunion à +300% (vitesse ×4) avec [Espace] / [Ctrl].',
                 type: ItemDefinition::TYPE_EQUIPMENT,
                 slot: ItemDefinition::SLOT_MOUNT,
                 rarity: ItemDefinition::RARITY_LEGENDARY,
@@ -576,7 +576,7 @@ final class ItemRegistry
                 sellPrice: 250,
                 buyPrice: 1000,
                 stackable: false,
-                mountSpeedBonus: 1.00,
+                mountSpeedBonus: 3.00,
                 mountCanFly: true,
             ),
         ];
