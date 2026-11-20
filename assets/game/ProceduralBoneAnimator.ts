@@ -150,6 +150,79 @@ export class ProceduralBoneAnimator {
   }
 
   /**
+   * Applies organic procedural breathing, weight shift, look-around, or seated mounted idle
+   * additively on top of the current AnimationMixer pose.
+   */
+  public applyIdle(
+    time: number,
+    weight: number,
+    mounted = false,
+    flying = false,
+    mountMoving = false,
+  ): ProceduralPoseResult {
+    if (weight <= 0.001) {
+      return { bodyOffsetY: 0, bodyOffsetZ: 0, bodyYawOffset: 0, active: false };
+    }
+
+    const breath = Math.sin(time * 2.1);
+    const breathLag = Math.sin(time * 2.1 - 0.55);
+    const sway = Math.sin(time * 0.95);
+    const lookYaw = Math.sin(time * 0.58) * Math.sin(time * 0.27) * 0.22;
+    const lookPitch = Math.sin(time * 0.41 + 1.1) * 0.055;
+
+    if (mounted) {
+      this.rot(this.bones.lThigh, 0.82 * weight, 0, 0.26 * weight);
+      this.rot(this.bones.lCalf, -0.74 * weight, 0, 0);
+      this.rot(this.bones.rThigh, 0.82 * weight, 0, -0.26 * weight);
+      this.rot(this.bones.rCalf, -0.74 * weight, 0, 0);
+
+      this.rot(this.bones.spine01, ((mountMoving ? -0.1 : 0.0) + 0.025 * breath) * weight, 0.03 * sway * weight, 0);
+      this.rot(this.bones.spine02, ((flying && mountMoving ? -0.08 : 0.0) + 0.03 * breath) * weight, 0, 0);
+      this.rot(this.bones.neck, lookPitch * 0.35 * weight, lookYaw * 0.35 * weight, 0);
+      this.rot(this.bones.head, lookPitch * 0.55 * weight, lookYaw * 0.65 * weight, 0.025 * sway * weight);
+
+      this.rot(this.bones.lUpperarm, (0.46 + 0.03 * breath) * weight, 0, 0.08 * weight);
+      this.rot(this.bones.lForearm, (0.42 + 0.025 * breathLag) * weight, 0, 0);
+      this.rot(this.bones.rUpperarm, (0.46 + 0.03 * breath) * weight, 0, -0.08 * weight);
+      this.rot(this.bones.rForearm, (0.42 + 0.025 * breathLag) * weight, 0, 0);
+
+      return { bodyOffsetY: 0, bodyOffsetZ: 0, bodyYawOffset: 0, active: true };
+    }
+
+    this.rot(this.bones.spine01, 0.032 * breath * weight, 0.045 * sway * weight, 0.028 * sway * weight);
+    this.rot(this.bones.spine02, 0.04 * breath * weight, 0.035 * sway * weight, -0.018 * sway * weight);
+    this.rot(this.bones.neck, lookPitch * 0.4 * weight, lookYaw * 0.35 * weight, 0);
+    this.rot(this.bones.head, (lookPitch * 0.6 - 0.025 * breath) * weight, lookYaw * 0.65 * weight, 0.03 * sway * weight);
+
+    this.rot(
+      this.bones.lUpperarm,
+      (0.025 * breath + 0.02 * sway) * weight,
+      0,
+      0.045 * (0.5 + 0.5 * breath) * weight,
+    );
+    this.rot(
+      this.bones.rUpperarm,
+      (0.025 * breath - 0.02 * sway) * weight,
+      0,
+      -0.045 * (0.5 + 0.5 * breath) * weight,
+    );
+    this.rot(this.bones.lForearm, (0.05 + 0.035 * breathLag) * weight, 0, 0);
+    this.rot(this.bones.rForearm, (0.05 + 0.035 * breathLag) * weight, 0, 0);
+
+    this.rot(this.bones.lThigh, (0.028 + 0.012 * breath) * weight, 0, 0);
+    this.rot(this.bones.rThigh, (0.028 + 0.012 * breath) * weight, 0, 0);
+    this.rot(this.bones.lCalf, (-0.055 - 0.024 * breath) * weight, 0, 0);
+    this.rot(this.bones.rCalf, (-0.055 - 0.024 * breath) * weight, 0, 0);
+
+    return {
+      bodyOffsetY: 0.018 * breath * weight,
+      bodyOffsetZ: 0,
+      bodyYawOffset: 0.025 * sway * weight,
+      active: true,
+    };
+  }
+
+  /**
    * Advances the procedural skill animation and applies additive bone rotations
    * directly on top of the current AnimationMixer pose for this frame.
    */

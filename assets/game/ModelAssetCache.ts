@@ -6,14 +6,112 @@ export interface LoadedCharacterRig {
   root: THREE.Group;
   mixer: THREE.AnimationMixer | null;
   walkAction: THREE.AnimationAction | null;
+  idleAction: THREE.AnimationAction | null;
 }
 
 interface CachedTemplate {
   scene: THREE.Group;
   animations: THREE.AnimationClip[];
+  idleClip: THREE.AnimationClip | null;
   texture: THREE.Texture | null;
   scale: number;
   offset: THREE.Vector3;
+}
+
+const STANDING_IDLE_ARM_BONES = new Set([
+  'L_Clavicle',
+  'L_Upperarm',
+  'L_UpperarmTwist01',
+  'L_UpperarmTwist02',
+  'L_Forearm',
+  'L_ForearmTwist01',
+  'L_ForearmTwist02',
+  'L_Hand',
+  'R_Clavicle',
+  'R_Upperarm',
+  'R_UpperarmTwist01',
+  'R_UpperarmTwist02',
+  'R_Forearm',
+  'R_ForearmTwist01',
+  'R_ForearmTwist02',
+  'R_Hand',
+]);
+
+function buildStandingIdleClip(fbx: THREE.Group, walkClip: THREE.AnimationClip): THREE.AnimationClip {
+  const bindPose = new Map<
+    string,
+    { position: THREE.Vector3; quaternion: THREE.Quaternion; scale: THREE.Vector3 }
+  >();
+  fbx.traverse((obj) => {
+    if (obj.name) {
+      bindPose.set(obj.name, {
+        position: obj.position.clone(),
+        quaternion: obj.quaternion.clone(),
+        scale: obj.scale.clone(),
+      });
+    }
+  });
+
+  const qA: Record<string, THREE.Quaternion> = {};
+  const qB: Record<string, THREE.Quaternion> = {};
+
+  const tempMixer = new THREE.AnimationMixer(fbx);
+  const act = tempMixer.clipAction(walkClip);
+  act.play();
+
+  act.time = 0;
+  tempMixer.update(0);
+  fbx.traverse((obj) => {
+    if (STANDING_IDLE_ARM_BONES.has(obj.name)) {
+      qA[obj.name] = obj.quaternion.clone();
+    }
+  });
+
+  act.time = (walkClip.duration || 2.3333) * 0.25;
+  tempMixer.update(0);
+  fbx.traverse((obj) => {
+    if (STANDING_IDLE_ARM_BONES.has(obj.name)) {
+      qB[obj.name] = obj.quaternion.clone();
+    }
+  });
+  tempMixer.stopAllAction();
+
+  // Restore exact clean bind pose before measuring bounds / playing frame 0
+  fbx.traverse((obj) => {
+    const saved = bindPose.get(obj.name);
+    if (saved) {
+      obj.position.copy(saved.position);
+      obj.quaternion.copy(saved.quaternion);
+      obj.scale.copy(saved.scale);
+    }
+  });
+
+  const times = [0, 1];
+  const tracks: THREE.KeyframeTrack[] = [];
+
+  for (const srcTrack of walkClip.tracks) {
+    const dotIdx = srcTrack.name.lastIndexOf('.');
+    if (dotIdx <= 0) continue;
+    const nodeName = srcTrack.name.slice(0, dotIdx);
+    const prop = srcTrack.name.slice(dotIdx + 1);
+    const bind = bindPose.get(nodeName);
+    if (!bind) continue;
+
+    if (prop === 'quaternion') {
+      const qa = qA[nodeName];
+      const qb = qB[nodeName];
+      const q = STANDING_IDLE_ARM_BONES.has(nodeName) && qa && qb ? qa.clone().slerp(qb, 0.5) : bind.quaternion;
+      tracks.push(new THREE.QuaternionKeyframeTrack(srcTrack.name, times, [q.x, q.y, q.z, q.w, q.x, q.y, q.z, q.w]));
+    } else if (prop === 'position') {
+      const p = bind.position;
+      tracks.push(new THREE.VectorKeyframeTrack(srcTrack.name, times, [p.x, p.y, p.z, p.x, p.y, p.z]));
+    } else if (prop === 'scale') {
+      const s = bind.scale;
+      tracks.push(new THREE.VectorKeyframeTrack(srcTrack.name, times, [s.x, s.y, s.z, s.x, s.y, s.z]));
+    }
+  }
+
+  return new THREE.AnimationClip('procedural:standing_idle', 1.0, tracks);
 }
 
 const TIKAF_FBX_URL = '/assets/models/tikaf/Tikaf.fbx';
@@ -72,6 +170,9 @@ function loadTikafTemplate(): Promise<CachedTemplate> {
         fbx.rotation.set(-Math.PI / 2, 0, 0);
         fbx.updateMatrixWorld(true);
 
+        const idleClip =
+          fbx.animations && fbx.animations.length > 0 ? buildStandingIdleClip(fbx, fbx.animations[0]) : null;
+
         // Pose on frame 0 before measuring exact standing bounding box
         if (fbx.animations && fbx.animations.length > 0) {
           const tempMixer = new THREE.AnimationMixer(fbx);
@@ -101,6 +202,7 @@ function loadTikafTemplate(): Promise<CachedTemplate> {
         resolve({
           scene: fbx,
           animations: fbx.animations ?? [],
+          idleClip,
           texture: sharedTexture,
           scale,
           offset,
@@ -137,14 +239,24 @@ export async function instantiateTikafRig(): Promise<LoadedCharacterRig> {
 
   let mixer: THREE.AnimationMixer | null = null;
   let walkAction: THREE.AnimationAction | null = null;
+  let idleAction: THREE.AnimationAction | null = null;
 
   if (tpl.animations.length > 0) {
     mixer = new THREE.AnimationMixer(cloned);
     walkAction = mixer.clipAction(tpl.animations[0]);
     walkAction.setLoop(THREE.LoopRepeat, Infinity);
     walkAction.play();
+    walkAction.setEffectiveWeight(0);
+
+    if (tpl.idleClip) {
+      idleAction = mixer.clipAction(tpl.idleClip);
+      idleAction.setLoop(THREE.LoopRepeat, Infinity);
+      idleAction.play();
+      idleAction.setEffectiveWeight(1);
+    }
+
     mixer.update(0);
   }
 
-  return { root, mixer, walkAction };
+  return { root, mixer, walkAction, idleAction };
 }

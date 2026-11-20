@@ -23,6 +23,9 @@ export interface AnimatedAvatar {
   fbxRoot: THREE.Group | null;
   fbxMixer: THREE.AnimationMixer | null;
   fbxWalkAction: THREE.AnimationAction | null;
+  fbxIdleAction: THREE.AnimationAction | null;
+  walkBlend: number;
+  idlePhase: number;
   boneAnimator: ProceduralBoneAnimator | null;
   equipmentRig: EquipmentVisualRig | null;
   pendingEquipped: Partial<Record<EquipmentSlot, EquippedSlotVisual | null>> | null;
@@ -215,6 +218,9 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     fbxRoot: null,
     fbxMixer: null,
     fbxWalkAction: null,
+    fbxIdleAction: null,
+    walkBlend: 0,
+    idlePhase: Math.random() * Math.PI * 2,
     boneAnimator: null,
     equipmentRig: null,
     pendingEquipped: null,
@@ -238,6 +244,8 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
       avatar.fbxRoot = rig.root;
       avatar.fbxMixer = rig.mixer;
       avatar.fbxWalkAction = rig.walkAction;
+      avatar.fbxIdleAction = rig.idleAction;
+      avatar.walkBlend = 0;
       avatar.boneAnimator = new ProceduralBoneAnimator(rig.root);
       avatar.equipmentRig = equipRig;
       if (avatar.pendingEquipped) {
@@ -517,9 +525,14 @@ export function animateAvatar(
 
     if (avatar.fbxRoot && avatar.fbxMixer && avatar.fbxWalkAction) {
       avatar.boneAnimator?.restoreBasePose();
+      avatar.walkBlend = 0;
+      avatar.fbxWalkAction.setEffectiveWeight(0);
       avatar.fbxWalkAction.paused = true;
-      avatar.fbxWalkAction.time = 0.28;
+      avatar.fbxIdleAction?.setEffectiveWeight(1);
       avatar.fbxMixer.update(0);
+      avatar.boneAnimator?.captureBasePose();
+      avatar.boneAnimator?.applyIdle(time + avatar.idlePhase, 1.0, true, isFlyingMount, activelyMoving);
+      avatar.boneAnimator?.apply(dt);
       avatar.equipmentRig?.update(dt, time);
     } else {
       avatar.leftLeg.rotation.x = THREE.MathUtils.lerp(avatar.leftLeg.rotation.x, -0.35, Math.min(1, dt * 10));
@@ -539,36 +552,42 @@ export function animateAvatar(
     // 1. Restore base bone rotations before mixer updates so procedural additive offsets never drift
     avatar.boneAnimator?.restoreBasePose();
 
-    // 2. Drive base locomotion strictly by actual ground distance moved (zero foot sliding!)
+    // 2. Smoothly blend walk vs synthesized standing idle & drive locomotion without foot sliding
+    const blendTarget = activelyMoving ? 1 : 0;
+    avatar.walkBlend = THREE.MathUtils.lerp(
+      avatar.walkBlend,
+      blendTarget,
+      Math.min(1, dt * (activelyMoving ? 12 : 9)),
+    );
+    if (avatar.walkBlend < 0.005) avatar.walkBlend = 0;
+    if (avatar.walkBlend > 0.995) avatar.walkBlend = 1;
+
     if (avatar.fbxMixer && avatar.fbxWalkAction) {
       const clipLen = avatar.fbxWalkAction.getClip().duration || 2.3333;
-      const halfCycle = clipLen * 0.5;
+      avatar.fbxWalkAction.setEffectiveWeight(avatar.walkBlend);
+      avatar.fbxIdleAction?.setEffectiveWeight(1 - avatar.walkBlend);
+
       if (activelyMoving) {
         const exactAnimStep = distanceMoved / TIKAF_FOOT_SPEED_AT_1X;
         const clampedStep = Math.min(exactAnimStep, dt * 5.2);
         avatar.fbxWalkAction.paused = false;
-        avatar.fbxMixer.update(clampedStep);
+        avatar.fbxWalkAction.time = (avatar.fbxWalkAction.time + clampedStep) % clipLen;
+      } else if (avatar.walkBlend > 0.005) {
+        avatar.fbxWalkAction.paused = false;
+        avatar.fbxWalkAction.time = (avatar.fbxWalkAction.time + dt * 0.35) % clipLen;
       } else {
-        const posInHalf = avatar.fbxWalkAction.time % halfCycle;
-        const restPhase = 0.28;
-        let deltaToRest = restPhase - posInHalf;
-        if (deltaToRest < -halfCycle * 0.5) deltaToRest += halfCycle;
-        if (deltaToRest > halfCycle * 0.5) deltaToRest -= halfCycle;
-
-        if (Math.abs(deltaToRest) > 0.025) {
-          avatar.fbxWalkAction.paused = false;
-          const step = Math.sign(deltaToRest) * Math.min(Math.abs(deltaToRest), dt * 2.4);
-          avatar.fbxWalkAction.time = (avatar.fbxWalkAction.time + step + clipLen) % clipLen;
-          avatar.fbxMixer.update(0);
-        } else {
-          avatar.fbxWalkAction.paused = true;
-          avatar.fbxMixer.update(0);
-        }
+        avatar.fbxWalkAction.paused = true;
       }
+      avatar.fbxMixer.update(0);
     }
 
-    // 3. Snapshot clean post-mixer pose, then layer skill-specific procedural bone animation on top!
+    // 3. Snapshot clean post-mixer pose, then layer procedural idle + active skill animation on top!
     avatar.boneAnimator?.captureBasePose();
+    const idleWeight = 1 - avatar.walkBlend;
+    const idleFactor = avatar.boneAnimator?.isPlaying() ? idleWeight * 0.25 : idleWeight;
+    const idlePose = avatar.boneAnimator
+      ? avatar.boneAnimator.applyIdle(time + avatar.idlePhase, idleFactor, false, false, false)
+      : { bodyOffsetY: 0, bodyOffsetZ: 0, bodyYawOffset: 0, active: false };
     const skillPose = avatar.boneAnimator
       ? avatar.boneAnimator.apply(dt)
       : { bodyOffsetY: 0, bodyOffsetZ: 0, bodyYawOffset: 0, active: false };
@@ -579,12 +598,22 @@ export function animateAvatar(
     }
 
     const baseTiltX = activelyMoving ? Math.min(0.12, speed * 0.011) : 0.0;
-    const baseBobY = activelyMoving ? 0 : Math.sin(time * 2.2) * 0.02;
-
     avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, baseTiltX, Math.min(1, dt * 14));
-    avatar.body.rotation.y = THREE.MathUtils.lerp(avatar.body.rotation.y, skillPose.bodyYawOffset, Math.min(1, dt * 18));
-    avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, skillPose.bodyOffsetZ, Math.min(1, dt * 18));
-    avatar.body.position.y = THREE.MathUtils.lerp(avatar.body.position.y, baseBobY + skillPose.bodyOffsetY, Math.min(1, dt * 20));
+    avatar.body.rotation.y = THREE.MathUtils.lerp(
+      avatar.body.rotation.y,
+      idlePose.bodyYawOffset + skillPose.bodyYawOffset,
+      Math.min(1, dt * 18),
+    );
+    avatar.body.position.z = THREE.MathUtils.lerp(
+      avatar.body.position.z,
+      idlePose.bodyOffsetZ + skillPose.bodyOffsetZ,
+      Math.min(1, dt * 18),
+    );
+    avatar.body.position.y = THREE.MathUtils.lerp(
+      avatar.body.position.y,
+      idlePose.bodyOffsetY + skillPose.bodyOffsetY,
+      Math.min(1, dt * 20),
+    );
     return;
   }
 
@@ -604,13 +633,14 @@ export function animateAvatar(
     avatar.rightArm.rotation.z = THREE.MathUtils.lerp(avatar.rightArm.rotation.z, 0, Math.min(1, dt * 10));
     avatar.body.position.y = Math.abs(Math.sin(time * freq)) * 0.14;
   } else {
+    const breath = Math.sin((time + avatar.idlePhase) * 2.1);
     avatar.leftLeg.rotation.x = THREE.MathUtils.lerp(avatar.leftLeg.rotation.x, 0, Math.min(1, dt * 10));
     avatar.rightLeg.rotation.x = THREE.MathUtils.lerp(avatar.rightLeg.rotation.x, 0, Math.min(1, dt * 10));
-    avatar.leftArm.rotation.x = THREE.MathUtils.lerp(avatar.leftArm.rotation.x, 0, Math.min(1, dt * 10));
-    avatar.rightArm.rotation.x = THREE.MathUtils.lerp(avatar.rightArm.rotation.x, 0, Math.min(1, dt * 10));
-    avatar.leftArm.rotation.z = THREE.MathUtils.lerp(avatar.leftArm.rotation.z, 0, Math.min(1, dt * 10));
-    avatar.rightArm.rotation.z = THREE.MathUtils.lerp(avatar.rightArm.rotation.z, 0, Math.min(1, dt * 10));
-    avatar.body.position.y = Math.sin(time * 2.6) * 0.04;
+    avatar.leftArm.rotation.x = THREE.MathUtils.lerp(avatar.leftArm.rotation.x, breath * 0.06, Math.min(1, dt * 8));
+    avatar.rightArm.rotation.x = THREE.MathUtils.lerp(avatar.rightArm.rotation.x, -breath * 0.06, Math.min(1, dt * 8));
+    avatar.leftArm.rotation.z = THREE.MathUtils.lerp(avatar.leftArm.rotation.z, 0.05 + breath * 0.025, Math.min(1, dt * 8));
+    avatar.rightArm.rotation.z = THREE.MathUtils.lerp(avatar.rightArm.rotation.z, -(0.05 + breath * 0.025), Math.min(1, dt * 8));
+    avatar.body.position.y = breath * 0.035;
   }
 
   if (avatar.attackTimer > 0) {
