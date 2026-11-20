@@ -6,6 +6,7 @@ import {
   createMonsterMesh,
   createNpcMesh,
   createPlayerAvatar,
+  setAvatarMountVisual,
   triggerAvatarSkill,
   type AnimatedAvatar,
   type LootVisual,
@@ -79,6 +80,7 @@ const SLOT_LABELS: Record<EquipmentSlot, string> = {
   ARMOR: '🛡️ Armure',
   HELM: '🪖 Coiffe',
   ACCESSORY: '💠 Talisman',
+  MOUNT: '🐎 Monture',
 };
 
 class SymfonyForeverGame {
@@ -333,7 +335,8 @@ class SymfonyForeverGame {
 
       const coordsEl = document.getElementById('hud-coords');
       if (coordsEl) {
-        coordsEl.textContent = `${Math.round(this.controller.x)}, ${Math.round(this.controller.z)} (${Math.round(this.controller.y)}m)`;
+        const flyTag = this.controller.isAirborne ? ' 🦅' : '';
+        coordsEl.textContent = `${Math.round(this.controller.x)}, ${Math.round(this.controller.z)} (${Math.round(this.controller.y)}m${flyTag})`;
       }
 
       this.renderer.render(this.scene, this.camera);
@@ -347,6 +350,7 @@ class SymfonyForeverGame {
     const outcome = await this.net.syncWorld({
       characterId: this.characterId,
       x: Number(this.controller.x.toFixed(2)),
+      y: Number(this.controller.y.toFixed(2)),
       z: Number(this.controller.z.toFixed(2)),
       rotY: Number(this.controller.rotY.toFixed(3)),
       isMoving: this.controller.isMoving,
@@ -416,6 +420,7 @@ class SymfonyForeverGame {
       if (!entry) {
         const avatar = createPlayerAvatar(p.classCode);
         avatar.group.position.set(p.x, p.y, p.z);
+        setAvatarMountVisual(avatar, p.activeMountCode ?? null);
         avatar.group.userData = { entityType: 'PLAYER', entityId: p.id };
         avatar.group.traverse((obj) => {
           obj.userData = { entityType: 'PLAYER', entityId: p.id };
@@ -432,6 +437,7 @@ class SymfonyForeverGame {
       } else {
         entry.state = p;
         entry.targetPos.set(p.x, p.y, p.z);
+        setAvatarMountVisual(entry.avatar, p.activeMountCode ?? null);
         const lbl = entry.nameplate.querySelector('.np-label');
         if (lbl) lbl.textContent = `${p.name} [${p.classCode}] N.${p.level}`;
       }
@@ -559,7 +565,7 @@ class SymfonyForeverGame {
       line = `<span style="color:#fde047">★ ${this.esc(ev.sourceName)} passe Niveau ${ev.amount} !</span>`;
       if (ev.sourceId === this.characterId) {
         const skillNote = ev.amount % 3 === 0 ? ' +1 point de compétence disponible !' : '';
-        this.showToast(`Niveau ${ev.amount} atteint ! +3 pts de stats${skillNote} (touche C).`);
+        this.showToast(`Niveau ${ev.amount} atteint ! +3 pts de stats${skillNote} (touche P).`);
       }
     }
 
@@ -696,8 +702,15 @@ class SymfonyForeverGame {
       if (e.key === 'Tab') {
         e.preventDefault();
         this.cycleNearestMonster();
-      } else if (e.code === 'KeyC' || e.key === 'c' || e.key === 'C') {
-        this.toggleCharModal(!this.charModalOpen);
+      } else if (e.code === 'KeyC') {
+        e.preventDefault();
+        if (!e.repeat && !(this.selfState?.isDead ?? false) && !this.charModalOpen) {
+          void this.toggleMount();
+        }
+      } else if (e.code === 'KeyP') {
+        if (!e.repeat) {
+          this.toggleCharModal(!this.charModalOpen);
+        }
       } else if (this.resolveSkillSlotFromKey(e) !== null) {
         e.preventDefault();
         if (!e.repeat) {
@@ -733,6 +746,9 @@ class SymfonyForeverGame {
     document.getElementById('btn-bag-modal')?.addEventListener('click', () => {
       if (this.charModalOpen) this.toggleCharModal(false);
       this.toggleBagModal(!this.bagModalOpen);
+    });
+    document.getElementById('btn-mount-toggle')?.addEventListener('click', () => {
+      void this.toggleMount();
     });
     document.getElementById('btn-close-bag-modal')?.addEventListener('click', () => this.toggleBagModal(false));
     document.getElementById('btn-close-npc-modal')?.addEventListener('click', () => this.closeNpcModal());
@@ -1329,8 +1345,9 @@ class SymfonyForeverGame {
     const skillPts = s.skillPoints ?? 0;
     const totalPts = s.statPoints + skillPts;
     if (sheetBtn) sheetBtn.classList.toggle('has-points', totalPts > 0);
-    if (badge) badge.textContent = totalPts > 0 ? `+${totalPts} pts` : '[C]';
+    if (badge) badge.textContent = totalPts > 0 ? `+${totalPts} pts` : '[P]';
 
+    this.syncMountState(s);
     this.updateSkillRankUi();
 
     const buffsEl = document.getElementById('hud-buffs');
@@ -1342,6 +1359,57 @@ class SymfonyForeverGame {
 
     document.getElementById('death-modal')?.classList.toggle('open', s.isDead);
     if (this.charModalOpen) this.renderCharModalContent();
+  }
+
+  private syncMountState(s: SelfState): void {
+    const mountCode = s.activeMountCode ?? null;
+    const mounted = mountCode !== null;
+    const speedBonus = s.mountSpeedBonus ?? 0;
+    const canFly = Boolean(s.mountCanFly);
+
+    this.controller.setMountState(mounted, speedBonus, canFly);
+    setAvatarMountVisual(this.selfAvatar, mountCode);
+
+    const btn = document.getElementById('btn-mount-toggle');
+    const badge = document.getElementById('mount-key-badge');
+    if (btn) {
+      btn.classList.toggle('mounted', mounted);
+      const labelSpan = btn.querySelector('span');
+      if (labelSpan) {
+        labelSpan.textContent = mounted
+          ? canFly
+            ? '🦅 En vol'
+            : `🐎 +${Math.round(speedBonus * 100)}%`
+          : '🐎 Monture';
+      }
+    }
+    if (badge) {
+      badge.textContent = mounted ? '[C] Desc.' : '[C]';
+    }
+  }
+
+  private async toggleMount(): Promise<void> {
+    if (this.selfState?.isDead) return;
+    const res = await this.net.toggleMount(this.characterId);
+    if (!res.ok) {
+      this.showToast(res.error ?? 'Impossible d\'utiliser cette monture.');
+      return;
+    }
+
+    if (res.self) {
+      this.selfState = res.self;
+      this.updateSelfHud();
+    }
+    if (res.inventory) {
+      this.applyInventoryState(res.inventory);
+    }
+
+    if (res.mounted) {
+      const flyHint = res.canFly ? ' · Espace/Ctrl pour voler' : '';
+      this.showToast(`En selle : ${res.mountName ?? 'Monture'} (+${Math.round((res.speedBonus ?? 0) * 100)}%${flyHint})`);
+    } else {
+      this.showToast('Vous descendez de votre monture.');
+    }
   }
 
   private updateTargetHud(): void {
@@ -1621,6 +1689,10 @@ class SymfonyForeverGame {
     avatar.fbxMixer?.stopAllAction();
     this.disposeProceduralObject(avatar.proceduralRoot);
     this.disposeProceduralObject(avatar.targetRing);
+    if (avatar.mountGroup) {
+      this.disposeProceduralObject(avatar.mountGroup);
+      avatar.mountGroup = null;
+    }
     // Only dispose non-FBX equipment meshes so shared Tikaf.fbx geometry & material in ModelAssetCache stay intact
     if (avatar.fbxRoot) {
       avatar.fbxRoot.traverse((obj) => {
@@ -2209,6 +2281,10 @@ class SymfonyForeverGame {
     for (const [k, v] of Object.entries(def.bonuses)) {
       if (v && v > 0) parts.push(`+${v} ${bonusLabels[k] ?? k}`);
     }
+    if (def.mountSpeedBonus && def.mountSpeedBonus > 0) {
+      parts.push(`+${Math.round(def.mountSpeedBonus * 100)}% vitesse`);
+      if (def.mountCanFly) parts.push('Vol libre (Espace/Ctrl)');
+    }
     if (def.restoreHp > 0) parts.push(`+${def.restoreHp} PV`);
     if (def.restoreMp > 0) parts.push(`+${def.restoreMp} PM`);
     if (def.minLevel > 1) parts.push(`Niv. ${def.minLevel}`);
@@ -2227,7 +2303,7 @@ class SymfonyForeverGame {
 
     const eqEl = document.getElementById('bag-equipped-list');
     if (eqEl) {
-      const slots: EquipmentSlot[] = ['WEAPON', 'ARMOR', 'HELM', 'ACCESSORY'];
+      const slots: EquipmentSlot[] = ['WEAPON', 'ARMOR', 'HELM', 'ACCESSORY', 'MOUNT'];
       eqEl.innerHTML = slots
         .map((slot) => {
           const ci = inv.equipped[slot];
@@ -2402,20 +2478,35 @@ class SymfonyForeverGame {
       })
       .join('');
 
+    const ownedCodes = new Set<string>();
+    for (const ci of inv.bag) ownedCodes.add(ci.itemCode);
+    for (const ci of Object.values(inv.equipped)) {
+      if (ci) ownedCodes.add(ci.itemCode);
+    }
+
+    const playerLevel = this.selfState?.level ?? 1;
     const stockCodes = this.manifest.vendorStocks[npcCode] ?? [];
     const buyRows = stockCodes
       .map((code) => {
         const def = this.manifest.items[code];
         if (!def || def.buyPrice <= 0) return '';
         const col = RARITY_COLORS[def.rarity];
-        const canAfford = inv.gold >= def.buyPrice;
+        const isMount = def.slot === 'MOUNT';
+        const alreadyOwned = isMount && ownedCodes.has(def.code);
+        const levelLocked = isMount && playerLevel < def.minLevel;
+        const canBuy = !alreadyOwned && !levelLocked && inv.gold >= def.buyPrice;
+        const btnLabel = alreadyOwned
+          ? 'Possédée ✓'
+          : levelLocked
+            ? `🔒 Niv. ${def.minLevel} (${def.buyPrice} 🪙)`
+            : `Acheter (${def.buyPrice} 🪙)`;
         return `
           <div class="bag-row" style="border-left-color:${col};">
             <div class="bag-row-main">
               <div class="bag-row-title" style="color:${col};">${def.icon} ${this.esc(def.name)}</div>
               <div class="bag-row-sub">${this.esc(this.formatItemDetails(def))}</div>
             </div>
-            <button type="button" class="mini-btn" ${canAfford ? '' : 'style="opacity:0.45;"'} data-buy-code="${def.code}">Acheter (${def.buyPrice} 🪙)</button>
+            <button type="button" class="mini-btn" ${canBuy ? '' : 'style="opacity:0.45;"'} ${alreadyOwned || levelLocked ? 'disabled' : ''} data-buy-code="${def.code}">${btnLabel}</button>
           </div>
         `;
       })

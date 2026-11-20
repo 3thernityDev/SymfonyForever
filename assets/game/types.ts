@@ -123,7 +123,7 @@ export interface QuestStatePayload {
 }
 
 export type ItemRarity = 'COMMON' | 'UNCOMMON' | 'RARE' | 'EPIC' | 'LEGENDARY';
-export type EquipmentSlot = 'WEAPON' | 'ARMOR' | 'HELM' | 'ACCESSORY';
+export type EquipmentSlot = 'WEAPON' | 'ARMOR' | 'HELM' | 'ACCESSORY' | 'MOUNT';
 
 export interface ItemDefinitionData {
   code: string;
@@ -140,6 +140,8 @@ export interface ItemDefinitionData {
   bonuses: Partial<Record<'vitality' | 'strength' | 'intelligence' | 'defense' | 'spirit', number>>;
   restoreHp: number;
   restoreMp: number;
+  mountSpeedBonus?: number;
+  mountCanFly?: boolean;
 }
 
 export interface CharacterItemState {
@@ -265,6 +267,9 @@ export interface SelfState {
   effects: ActiveEffectView[];
   partyId: number | null;
   pendingPartyInviteId: number | null;
+  activeMountCode?: string | null;
+  mountSpeedBonus?: number;
+  mountCanFly?: boolean;
 }
 
 export interface PublicPlayer {
@@ -282,6 +287,7 @@ export interface PublicPlayer {
   z: number;
   rotY: number;
   partyId: number | null;
+  activeMountCode?: string | null;
 }
 
 export interface MonsterState {

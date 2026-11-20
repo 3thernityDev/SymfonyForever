@@ -14,6 +14,7 @@ final readonly class ItemDefinition
     public const string SLOT_ARMOR = 'ARMOR';
     public const string SLOT_HELM = 'HELM';
     public const string SLOT_ACCESSORY = 'ACCESSORY';
+    public const string SLOT_MOUNT = 'MOUNT';
 
     public const string RARITY_COMMON = 'COMMON';
     public const string RARITY_UNCOMMON = 'UNCOMMON';
@@ -27,6 +28,7 @@ final readonly class ItemDefinition
         self::SLOT_ARMOR,
         self::SLOT_HELM,
         self::SLOT_ACCESSORY,
+        self::SLOT_MOUNT,
     ];
 
     /**
@@ -47,7 +49,14 @@ final readonly class ItemDefinition
         public array $bonuses = [],
         public int $restoreHp = 0,
         public int $restoreMp = 0,
+        public float $mountSpeedBonus = 0.0,
+        public bool $mountCanFly = false,
     ) {
+    }
+
+    public function isMount(): bool
+    {
+        return $this->slot === self::SLOT_MOUNT && $this->mountSpeedBonus > 0.0;
     }
 
     public static function rarityRank(string $rarity): int
@@ -81,6 +90,8 @@ final readonly class ItemDefinition
             'bonuses' => $this->bonuses,
             'restoreHp' => $this->restoreHp,
             'restoreMp' => $this->restoreMp,
+            'mountSpeedBonus' => $this->mountSpeedBonus,
+            'mountCanFly' => $this->mountCanFly,
         ];
     }
 }

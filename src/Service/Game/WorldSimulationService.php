@@ -578,6 +578,7 @@ final class WorldSimulationService
     ): void {
         $victim->setCurrentHp(0)
             ->setIsDead(true)
+            ->setActiveMountCode(null)
             ->setActiveEffects([])
             ->setPendingPartyInviteId(null)
             ->setIsMoving(false);

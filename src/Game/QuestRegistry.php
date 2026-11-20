@@ -21,7 +21,7 @@ final class QuestRegistry
                 order: 1,
                 title: 'Nettoyage du Lagon',
                 description: 'Les Crabes de Récif envahissent la plage de Saint-Gilles ! Élimine-en 3 près du camp pour te faire la main au combat (Tab pour cibler, touches 1-4 pour lancer tes sorts).',
-                completionText: 'Bien joué ! Tu maîtrises déjà tes premières compétences. Pense à vérifier ta fiche de stats (touche C) quand tu montes de niveau !',
+                completionText: 'Bien joué ! Tu maîtrises déjà tes premières compétences. Pense à vérifier ta fiche de stats (touche P) quand tu montes de niveau !',
                 giverNpcCode: 'gramoun_tijean',
                 turnInNpcCode: 'gramoun_tijean',
                 minLevel: 1,

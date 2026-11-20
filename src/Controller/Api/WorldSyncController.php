@@ -6,6 +6,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Character;
 use App\Entity\User;
+use App\Game\ItemRegistry;
 use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ChatMessageRepository;
@@ -43,6 +44,7 @@ final class WorldSyncController extends AbstractController
         BotSimulationService $botSimulationService,
         QuestService $questService,
         InventoryService $inventoryService,
+        ItemRegistry $itemRegistry,
         StatePayloadBuilder $payloadBuilder,
     ): JsonResponse {
         /** @var User $user */
@@ -62,7 +64,13 @@ final class WorldSyncController extends AbstractController
         $prevSeen = $character->getLastSeenAt();
         $dt = $prevSeen > 0.0 ? min(3.0, max(0.05, $now - $prevSeen)) : 1.0;
 
-        // Authoritative movement & walkability validation (when alive & position sent)
+        $activeMountCode = $character->getActiveMountCode();
+        $mountDef = $activeMountCode !== null ? $itemRegistry->get($activeMountCode) : null;
+        $mountBonus = $mountDef?->mountSpeedBonus ?? 0.0;
+        $isFlying = $mountDef?->mountCanFly ?? false;
+        $maxSpeed = self::MAX_PLAYER_SPEED * (1.0 + $mountBonus);
+
+        // Authoritative movement & walkability / flight validation (when alive & position sent)
         $correctedPosition = false;
         if (!$character->isDead() && isset($data['x'], $data['z'])) {
             $reqX = (float) $data['x'];
@@ -71,9 +79,28 @@ final class WorldSyncController extends AbstractController
             $isMoving = (bool) ($data['isMoving'] ?? false);
 
             $dist = hypot($reqX - $character->getPosX(), $reqZ - $character->getPosZ());
-            $maxAllowed = self::MAX_PLAYER_SPEED * $dt + 8.0;
+            $maxAllowed = $maxSpeed * $dt + 10.0;
 
-            if ($dist <= $maxAllowed && $terrainService->isWalkable($reqX, $reqZ)) {
+            if ($isFlying) {
+                $halfLimit = WorldCatalog::HALF_WORLD - 32.0;
+                $inBounds = abs($reqX) <= $halfLimit && abs($reqZ) <= $halfLimit;
+                $groundY = $terrainService->getHeight($reqX, $reqZ);
+                $minFlyY = max($groundY, WorldCatalog::SEA_LEVEL + 1.2);
+                $maxFlyY = WorldCatalog::MAX_ELEVATION + 220.0;
+                $rawReqY = isset($data['y']) ? (float) $data['y'] : max($groundY, $character->getPosY());
+                $reqY = max($minFlyY, min($maxFlyY, $rawReqY));
+                $dy = abs($reqY - $character->getPosY());
+                $maxAllowedY = $maxSpeed * $dt + 16.0;
+
+                if ($dist <= $maxAllowed && $dy <= $maxAllowedY && $inBounds) {
+                    $character->setPosX($reqX);
+                    $character->setPosZ($reqZ);
+                    $character->setPosY($reqY);
+                    $character->setZoneCode($terrainService->getZoneCode($reqX, $reqZ));
+                } else {
+                    $correctedPosition = true;
+                }
+            } elseif ($dist <= $maxAllowed && $terrainService->isWalkable($reqX, $reqZ)) {
                 $character->setPosX($reqX);
                 $character->setPosZ($reqZ);
                 $character->setPosY($terrainService->getHeight($reqX, $reqZ));
@@ -85,8 +112,10 @@ final class WorldSyncController extends AbstractController
             $character->setRotY($reqRotY);
             $character->setIsMoving($isMoving);
         } else {
-            // Ensure Y always matches heightmap
-            $character->setPosY($terrainService->getHeight($character->getPosX(), $character->getPosZ()));
+            // Ensure Y always matches heightmap when grounded or dead
+            if (!$isFlying || $character->isDead()) {
+                $character->setPosY($terrainService->getHeight($character->getPosX(), $character->getPosZ()));
+            }
             $character->setIsMoving(false);
         }
 

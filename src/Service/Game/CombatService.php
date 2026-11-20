@@ -9,6 +9,7 @@ use App\Entity\ChatMessage;
 use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
 use App\Game\CharacterClass;
+use App\Game\ItemRegistry;
 use App\Game\SkillDefinition;
 use App\Game\SkillRegistry;
 use App\Repository\CharacterRepository;
@@ -19,6 +20,8 @@ final class CombatService
 {
     public const float AUTO_ATTACK_COOLDOWN = 1.2;
 
+    private readonly ItemRegistry $itemRegistry;
+
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly SkillRegistry $skillRegistry,
@@ -28,7 +31,9 @@ final class CombatService
         private readonly InventoryService $inventoryService,
         private readonly CharacterRepository $characterRepository,
         private readonly MonsterInstanceRepository $monsterRepository,
+        ?ItemRegistry $itemRegistry = null,
     ) {
+        $this->itemRegistry = $itemRegistry ?? new ItemRegistry();
     }
 
     /**
@@ -51,6 +56,11 @@ final class CombatService
 
         if ($caster->isDead()) {
             return ['ok' => false, 'error' => 'Vous êtes vaincu. Ressuscitez au camp.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+        }
+
+        $mountErr = $this->resolveCombatMountRestriction($caster);
+        if ($mountErr !== null) {
+            return ['ok' => false, 'error' => $mountErr, 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
         }
 
         $skill = $this->skillRegistry->get($skillCode);
@@ -209,6 +219,11 @@ final class CombatService
 
         if ($caster->isDead()) {
             return ['ok' => false, 'error' => 'Vous êtes vaincu. Ressuscitez au camp.', 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
+        }
+
+        $mountErr = $this->resolveCombatMountRestriction($caster);
+        if ($mountErr !== null) {
+            return ['ok' => false, 'error' => $mountErr, 'events' => [], 'xpGained' => 0, 'leveledUp' => false];
         }
 
         $cooldowns = $caster->getCooldowns();
@@ -852,6 +867,21 @@ final class CombatService
             );
             $this->em->persist($pullMsg);
         }
+    }
+
+    private function resolveCombatMountRestriction(Character $caster): ?string
+    {
+        $mountCode = $caster->getActiveMountCode();
+        if ($mountCode === null) {
+            return null;
+        }
+        $def = $this->itemRegistry->get($mountCode);
+        if ($def !== null && $def->mountCanFly) {
+            return 'Descendez de votre monture volante (touche C) pour combattre.';
+        }
+        $caster->setActiveMountCode(null);
+
+        return null;
     }
 
     private function distance2D(float $x1, float $z1, float $x2, float $z2): float

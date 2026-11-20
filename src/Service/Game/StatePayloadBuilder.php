@@ -7,17 +7,21 @@ namespace App\Service\Game;
 use App\Entity\Character;
 use App\Entity\MonsterInstance;
 use App\Entity\Party;
+use App\Game\ItemRegistry;
 use App\Game\SkillRegistry;
 
 final class StatePayloadBuilder
 {
     private readonly SkillRegistry $skillRegistry;
+    private readonly ItemRegistry $itemRegistry;
 
     public function __construct(
         private readonly StatCalculator $statCalculator,
         ?SkillRegistry $skillRegistry = null,
+        ?ItemRegistry $itemRegistry = null,
     ) {
         $this->skillRegistry = $skillRegistry ?? new SkillRegistry();
+        $this->itemRegistry = $itemRegistry ?? new ItemRegistry();
     }
 
     /**
@@ -53,6 +57,8 @@ final class StatePayloadBuilder
         foreach ($this->skillRegistry->forClass($cls) as $skill) {
             $skillLevels[$skill->code] = $c->getSkillLevel($skill->code);
         }
+        $activeMountCode = $c->getActiveMountCode();
+        $mountDef = $activeMountCode !== null ? $this->itemRegistry->get($activeMountCode) : null;
 
         return [
             'id' => $c->getId(),
@@ -101,6 +107,9 @@ final class StatePayloadBuilder
             'effects' => $effects,
             'partyId' => $c->getParty()?->getId(),
             'pendingPartyInviteId' => $c->getPendingPartyInviteId(),
+            'activeMountCode' => $mountDef?->code,
+            'mountSpeedBonus' => $mountDef?->mountSpeedBonus ?? 0.0,
+            'mountCanFly' => $mountDef?->mountCanFly ?? false,
         ];
     }
 
@@ -128,6 +137,7 @@ final class StatePayloadBuilder
             'z' => round($c->getPosZ(), 2),
             'rotY' => round($c->getRotY(), 3),
             'partyId' => $c->getParty()?->getId(),
+            'activeMountCode' => $c->getActiveMountCode(),
         ];
     }
 

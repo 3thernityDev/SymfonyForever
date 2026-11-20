@@ -298,7 +298,7 @@ final class BotProfileCatalog
         if (self::containsAny($norm, ['?', 'ou ', 'xp', 'level', 'niv', 'loot', 'stuff', 'quete', 'legendaire', 'skill', 'sort'])) {
             $options = [
                 'Au Lagon c\'est top pour débuter, ensuite direction Salazie ou Mafate !',
-                'Pense à monter tes skills tous les 3 niveaux (touche C), ça booste vraiment les dégâts !',
+                'Pense à monter tes skills tous les 3 niveaux (touche P), ça booste vraiment les dégâts !',
                 'Je farm tranquillement ici pour prendre quelques niveaux et de l\'équipement.',
                 sprintf('Je suis dans le coin (%s), tu fais la quête principale ?', WorldCatalog::zones()[$zoneCode]['name'] ?? 'La Réunion'),
             ];

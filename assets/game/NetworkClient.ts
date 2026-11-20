@@ -23,6 +23,7 @@ export class NetworkClient {
   public async syncWorld(payload: {
     characterId: number;
     x: number;
+    y?: number;
     z: number;
     rotY: number;
     isMoving: boolean;
@@ -176,6 +177,38 @@ export class NetworkClient {
       body: JSON.stringify({ characterId, zoneCode }),
     });
     return (await res.json()) as { ok: boolean; error?: string; self?: SelfState; quests?: QuestStatePayload };
+  }
+
+  public async toggleMount(
+    characterId: number,
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    mounted?: boolean;
+    mountCode?: string | null;
+    mountName?: string | null;
+    speedBonus?: number;
+    canFly?: boolean;
+    self?: SelfState;
+    inventory?: InventoryStatePayload;
+  }> {
+    const res = await fetch('/api/character/mount/toggle', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ characterId }),
+    });
+    return (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      mounted?: boolean;
+      mountCode?: string | null;
+      mountName?: string | null;
+      speedBonus?: number;
+      canFly?: boolean;
+      self?: SelfState;
+      inventory?: InventoryStatePayload;
+    };
   }
 
   public async acceptQuest(

@@ -24,6 +24,12 @@ export class PlayerController {
   private lastPointerX = 0;
   private lastPointerY = 0;
   private inputBlocked = false;
+  private isMounted = false;
+  private mountSpeedBonus = 0;
+  private mountCanFly = false;
+  public isAirborne = false;
+  private readonly worldHalfBound = 3540;
+  private readonly maxFlyAltitude = 550;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -36,7 +42,7 @@ export class PlayerController {
       this.keys.add(e.code);
       if (e.code === 'Space') {
         e.preventDefault();
-        if (this.isGrounded) {
+        if (!(this.isMounted && this.mountCanFly) && this.isGrounded) {
           this.vy = 13.5;
           this.isGrounded = false;
         }
@@ -96,6 +102,20 @@ export class PlayerController {
     );
   }
 
+  public setMountState(mounted: boolean, speedBonus: number, canFly: boolean): void {
+    const wasFlying = this.isMounted && this.mountCanFly;
+    this.isMounted = mounted;
+    this.mountSpeedBonus = mounted ? Math.max(0, speedBonus) : 0;
+    this.mountCanFly = mounted && canFly;
+    if (wasFlying && !this.mountCanFly) {
+      const groundY = this.sampler.getHeight(this.x, this.z);
+      if (this.y > groundY + 0.1) {
+        this.isGrounded = false;
+        this.vy = 0;
+      }
+    }
+  }
+
   public setInputBlocked(blocked: boolean): void {
     this.inputBlocked = blocked;
     if (blocked) this.keys.clear();
@@ -141,13 +161,20 @@ export class PlayerController {
         dz /= len;
       }
 
-      const activeSpeed = this.isSprinting ? this.sprintSpeed : this.walkSpeed;
+      const mountMult = this.isMounted ? 1.0 + this.mountSpeedBonus : 1.0;
+      const baseSpeed = this.isSprinting ? this.sprintSpeed : this.walkSpeed;
+      const activeSpeed = baseSpeed * mountMult;
       const step = activeSpeed * dt;
       const candX = this.x + dx * step;
       const candZ = this.z + dz * step;
 
-      // Slide smoothly along ocean shoreline or steep remparts
-      if (this.sampler.isWalkable(candX, candZ)) {
+      if (this.isMounted && this.mountCanFly) {
+        // Free flight anywhere above La Réunion (within island airspace bounds)
+        this.x = Math.max(-this.worldHalfBound, Math.min(this.worldHalfBound, candX));
+        this.z = Math.max(-this.worldHalfBound, Math.min(this.worldHalfBound, candZ));
+        this.isMoving = true;
+      } else if (this.sampler.isWalkable(candX, candZ)) {
+        // Slide smoothly along ocean shoreline or steep remparts
         this.x = candX;
         this.z = candZ;
         this.isMoving = true;
@@ -169,9 +196,24 @@ export class PlayerController {
 
     this.lastDistanceMoved = Math.hypot(this.x - prevX, this.z - prevZ);
 
-    // Gravity & ground clamping against Réunion heightmap
+    // Flight altitude or gravity & ground clamping against Réunion heightmap
     const groundY = this.sampler.getHeight(this.x, this.z);
-    if (!this.isGrounded) {
+    if (this.isMounted && this.mountCanFly && !isDead) {
+      let ascend = 0;
+      if (!this.inputBlocked) {
+        if (this.keys.has('Space')) ascend += 1;
+        if (this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyX')) ascend -= 1;
+      }
+      if (ascend !== 0) {
+        this.y += ascend * 18.0 * dt;
+        if (ascend > 0) this.isMoving = true;
+      }
+      const minFlyY = Math.max(groundY, 7.2);
+      this.y = Math.max(minFlyY, Math.min(this.maxFlyAltitude, this.y));
+      this.vy = 0;
+      this.isGrounded = this.y <= minFlyY + 0.05;
+      this.isAirborne = this.y > groundY + 0.45;
+    } else if (!this.isGrounded) {
       this.vy -= 34.0 * dt;
       this.y += this.vy * dt;
       if (this.y <= groundY) {
@@ -179,8 +221,10 @@ export class PlayerController {
         this.vy = 0;
         this.isGrounded = true;
       }
+      this.isAirborne = !this.isGrounded;
     } else {
       this.y = groundY;
+      this.isAirborne = false;
     }
 
     // Orbit third-person camera placement + terrain clip avoidance

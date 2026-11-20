@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Game;
 
+use App\Service\Game\LevelingService;
+
 /**
- * Master catalog of items, consumables, monster drops, equipment (Niv 1-55) and NPC shop stock.
+ * Master catalog of items, consumables, mounts, monster drops, equipment (Niv 1-55) and NPC shop stock.
  */
 final class ItemRegistry
 {
@@ -530,6 +532,53 @@ final class ItemRegistry
                 stackable: false,
                 bonuses: ['vitality' => 38, 'intelligence' => 40, 'strength' => 35, 'defense' => 26, 'spirit' => 32],
             ),
+
+            // ================= MONTURES (Sol +60%, Sol +100%, Volante +100% Niv. 60) =================
+            new ItemDefinition(
+                code: 'mount_sol_60',
+                name: 'Poney des Plaines (+60%)',
+                description: 'Monture robuste de la Plaine des Cafres augmentant votre vitesse au sol de +60%. Utilisable avec [C].',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_MOUNT,
+                rarity: ItemDefinition::RARITY_UNCOMMON,
+                minLevel: 1,
+                icon: '🐎',
+                sellPrice: 50,
+                buyPrice: 200,
+                stackable: false,
+                mountSpeedBonus: 0.60,
+                mountCanFly: false,
+            ),
+            new ItemDefinition(
+                code: 'mount_sol_100',
+                name: 'Destrier du Basalte (+100%)',
+                description: 'Monture d\'élite des cirques augmentant votre vitesse au sol de +100%. Utilisable avec [C].',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_MOUNT,
+                rarity: ItemDefinition::RARITY_RARE,
+                minLevel: 30,
+                icon: '🐴',
+                sellPrice: 125,
+                buyPrice: 500,
+                stackable: false,
+                mountSpeedBonus: 1.00,
+                mountCanFly: false,
+            ),
+            new ItemDefinition(
+                code: 'mount_vol_100',
+                name: 'Paille-en-Queue Royal (Vol +100%)',
+                description: 'Monture aérienne mythique réservée aux champions de niveau maximum (Niv. 60) : survole toute La Réunion à +100% avec [Espace] / [Ctrl].',
+                type: ItemDefinition::TYPE_EQUIPMENT,
+                slot: ItemDefinition::SLOT_MOUNT,
+                rarity: ItemDefinition::RARITY_LEGENDARY,
+                minLevel: LevelingService::MAX_LEVEL,
+                icon: '🦅',
+                sellPrice: 250,
+                buyPrice: 1000,
+                stackable: false,
+                mountSpeedBonus: 1.00,
+                mountCanFly: true,
+            ),
         ];
 
         foreach ($defs as $item) {
@@ -570,7 +619,7 @@ final class ItemRegistry
      */
     public function vendorStockForNpc(string $npcCode): array
     {
-        return match ($npcCode) {
+        $base = match ($npcCode) {
             'gramoun_tijean' => ['tisane_soin', 'eau_cilaos', 'lame_corail', 'baton_filao', 'tunique_lagon', 'chapeau_vacoua', 'collier_coquillage'],
             'soeur_rosalie' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'machette_salazie', 'sceptre_cascades'],
             'ticoq_guide' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'cuirasse_mafate'],
@@ -578,6 +627,8 @@ final class ItemRegistry
             'capitaine_basalte', 'eclaireuse_maido', 'vulcanologue_piton' => ['tisane_soin', 'eau_cilaos', 'elixir_volcan', 'nectar_piton', 'lame_obsidienne', 'cuirasse_mafate', 'amulette_cirques'],
             default => ['tisane_soin', 'eau_cilaos'],
         };
+
+        return [...$base, 'mount_sol_60', 'mount_sol_100', 'mount_vol_100'];
     }
 
     /**

@@ -26,6 +26,11 @@ export interface AnimatedAvatar {
   boneAnimator: ProceduralBoneAnimator | null;
   equipmentRig: EquipmentVisualRig | null;
   pendingEquipped: Partial<Record<EquipmentSlot, EquippedSlotVisual | null>> | null;
+  mountGroup: THREE.Group | null;
+  activeMountCode: string | null;
+  mountSeatY: number;
+  mountLegs: THREE.Object3D[];
+  mountWings: THREE.Object3D[];
 }
 
 export function applyAvatarEquipment(
@@ -213,6 +218,11 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
     boneAnimator: null,
     equipmentRig: null,
     pendingEquipped: null,
+    mountGroup: null,
+    activeMountCode: null,
+    mountSeatY: 0,
+    mountLegs: [],
+    mountWings: [],
   };
 
   // Universal Tikaf.fbx base rig for ALL classes (TANK, DPS, HEAL):
@@ -241,6 +251,219 @@ export function createPlayerAvatar(classCode: ClassCode): AnimatedAvatar {
   return avatar;
 }
 
+function disposeMountGroup(root: THREE.Object3D): void {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry?.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const m of mats) {
+      if (m) m.dispose();
+    }
+  });
+}
+
+function buildMountVisual(mountCode: string): {
+  group: THREE.Group;
+  seatY: number;
+  legs: THREE.Object3D[];
+  wings: THREE.Object3D[];
+} {
+  const group = new THREE.Group();
+  const legs: THREE.Object3D[] = [];
+  const wings: THREE.Object3D[] = [];
+
+  if (mountCode === 'mount_vol_100') {
+    // Paille-en-Queue Royal (Vol +100%)
+    const whiteMat = mat(0xf8fafc, 0.45, 0.1);
+    const goldMat = mat(0xfacc15, 0.25, 0.65, 0xf59e0b);
+    const saddleMat = mat(0x0f766e, 0.55, 0.2, 0x14b8a6);
+    const beakMat = mat(0xf97316, 0.35, 0.25);
+
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.75, 10, 8), whiteMat);
+    torso.scale.set(0.95, 0.72, 2.05);
+    torso.position.set(0, 1.5, 0.05);
+
+    const breast = new THREE.Mesh(new THREE.ConeGeometry(0.56, 1.15, 7), whiteMat);
+    breast.rotation.x = Math.PI / 2.2;
+    breast.position.set(0, 1.52, 1.25);
+
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 0.95, 7), whiteMat);
+    neck.rotation.x = 0.55;
+    neck.position.set(0, 2.05, 1.55);
+
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 7), whiteMat);
+    head.scale.set(0.9, 0.9, 1.25);
+    head.position.set(0, 2.45, 1.92);
+
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.42, 5), goldMat);
+    crown.position.set(0, 2.82, 1.85);
+    crown.rotation.x = -0.3;
+
+    const beak = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.65, 5), beakMat);
+    beak.rotation.x = Math.PI / 2;
+    beak.position.set(0, 2.42, 2.45);
+
+    const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.16, 0.92), saddleMat);
+    saddle.position.set(0, 1.98, 0.05);
+    const trim = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.05, 5, 14), goldMat);
+    trim.rotation.x = Math.PI / 2;
+    trim.position.set(0, 2.02, 0.05);
+
+    // Long white twin tail streamers iconic of La Réunion's Paille-en-Queue
+    const tailBase = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.0, 6), whiteMat);
+    tailBase.rotation.x = -Math.PI / 2;
+    tailBase.position.set(0, 1.52, -1.65);
+
+    const streamerGeo = new THREE.CylinderGeometry(0.04, 0.015, 2.6, 5);
+    const s1 = new THREE.Mesh(streamerGeo, mat(0xffffff, 0.25, 0.15, 0xfef08a));
+    s1.rotation.x = Math.PI / 2;
+    s1.rotation.z = 0.08;
+    s1.position.set(-0.14, 1.54, -3.0);
+    const s2 = s1.clone();
+    s2.rotation.z = -0.08;
+    s2.position.x = 0.14;
+
+    group.add(torso, breast, neck, head, crown, beak, saddle, trim, tailBase, s1, s2);
+
+    // Articulated soaring wings
+    for (const side of [-1, 1]) {
+      const wingPivot = new THREE.Group();
+      wingPivot.position.set(side * 0.52, 1.72, 0.28);
+
+      const innerWing = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.1, 1.05), whiteMat);
+      innerWing.position.set(side * 0.78, 0, -0.05);
+
+      const outerWing = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.08, 0.72), whiteMat);
+      outerWing.position.set(side * 2.05, 0.06, -0.22);
+      outerWing.rotation.y = -side * 0.22;
+
+      const goldTip = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.09, 0.56), goldMat);
+      goldTip.position.set(side * 2.75, 0.08, -0.38);
+      goldTip.rotation.y = -side * 0.28;
+
+      wingPivot.add(innerWing, outerWing, goldTip);
+      group.add(wingPivot);
+      wings.push(wingPivot);
+    }
+
+    return { group, seatY: 1.45, legs, wings };
+  }
+
+  // Ground mounts: mount_sol_60 (Poney des Plaines) vs mount_sol_100 (Destrier du Basalte)
+  const isEliteGround = mountCode === 'mount_sol_100';
+  const coatMat = mat(isEliteGround ? 0x1e293b : 0x7c2d12, isEliteGround ? 0.45 : 0.75, isEliteGround ? 0.45 : 0.1);
+  const maneMat = mat(
+    isEliteGround ? 0xf97316 : 0x291509,
+    0.4,
+    0.25,
+    isEliteGround ? 0xea580c : undefined,
+  );
+  const saddleMat = mat(isEliteGround ? 0xb91c1c : 0x0d9488, 0.55, 0.2);
+  const hoofMat = mat(isEliteGround ? 0xf97316 : 0x1f2937, 0.35, 0.4, isEliteGround ? 0xf97316 : undefined);
+  const bodyScale = isEliteGround ? 1.15 : 0.98;
+  const seatY = isEliteGround ? 1.18 : 0.96;
+
+  const horseBody = new THREE.Group();
+  horseBody.scale.setScalar(bodyScale);
+  group.add(horseBody);
+
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.78, 2.05), coatMat);
+  torso.position.set(0, 1.18, 0);
+  torso.castShadow = true;
+
+  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.88, 0.46), coatMat);
+  neck.rotation.x = 0.48;
+  neck.position.set(0, 1.72, 1.02);
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.76), coatMat);
+  head.rotation.x = 0.25;
+  head.position.set(0, 2.05, 1.38);
+
+  const mane = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.82, 0.22), maneMat);
+  mane.rotation.x = 0.48;
+  mane.position.set(0, 1.84, 0.84);
+
+  const saddle = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.16, 0.85), saddleMat);
+  saddle.position.set(0, 1.62, -0.05);
+
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.88, 5), maneMat);
+  tail.rotation.x = 0.42;
+  tail.position.set(0, 1.05, -1.24);
+
+  horseBody.add(torso, neck, head, mane, saddle, tail);
+
+  if (isEliteGround) {
+    // Basalt warhorse barding + glowing magma brow horn
+    const armorMat = mat(0x475569, 0.3, 0.75);
+    const chestArmor = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.65, 0.55), armorMat);
+    chestArmor.position.set(0, 1.24, 0.88);
+    const helm = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.26, 0.68), armorMat);
+    helm.rotation.x = 0.25;
+    helm.position.set(0, 2.16, 1.4);
+    const horn = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.42, 5), hoofMat);
+    horn.rotation.x = 0.6;
+    horn.position.set(0, 2.38, 1.56);
+    horseBody.add(chestArmor, helm, horn);
+  }
+
+  // 4 animated legs
+  const legCoords: [number, number][] = [
+    [-0.28, 0.72],
+    [0.28, 0.72],
+    [-0.28, -0.72],
+    [0.28, -0.72],
+  ];
+  const legGeo = new THREE.BoxGeometry(0.22, 0.82, 0.24);
+  const hoofGeo = new THREE.BoxGeometry(0.24, 0.16, 0.26);
+  for (const [lx, lz] of legCoords) {
+    const pivot = new THREE.Group();
+    pivot.position.set(lx, 0.88, lz);
+    const legMesh = new THREE.Mesh(legGeo, coatMat);
+    legMesh.position.y = -0.38;
+    const hoof = new THREE.Mesh(hoofGeo, hoofMat);
+    hoof.position.y = -0.8;
+    pivot.add(legMesh, hoof);
+    horseBody.add(pivot);
+    legs.push(pivot);
+  }
+
+  return { group, seatY, legs, wings };
+}
+
+export function setAvatarMountVisual(avatar: AnimatedAvatar, mountCode: string | null): void {
+  const normalized = mountCode && mountCode.length > 0 ? mountCode : null;
+  if (avatar.activeMountCode === normalized) {
+    return;
+  }
+
+  if (avatar.mountGroup) {
+    avatar.group.remove(avatar.mountGroup);
+    disposeMountGroup(avatar.mountGroup);
+    avatar.mountGroup = null;
+    avatar.mountLegs = [];
+    avatar.mountWings = [];
+    avatar.mountSeatY = 0;
+  }
+
+  avatar.activeMountCode = normalized;
+  if (!normalized) {
+    avatar.body.position.y = 0;
+    avatar.body.rotation.x = 0;
+    return;
+  }
+
+  const built = buildMountVisual(normalized);
+  built.group.traverse((obj) => {
+    obj.userData = avatar.group.userData;
+  });
+  avatar.group.add(built.group);
+  avatar.mountGroup = built.group;
+  avatar.mountSeatY = built.seatY;
+  avatar.mountLegs = built.legs;
+  avatar.mountWings = built.wings;
+}
+
 export function animateAvatar(
   avatar: AnimatedAvatar,
   dt: number,
@@ -252,6 +475,59 @@ export function animateAvatar(
   if (isDead) {
     avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, -Math.PI / 2, Math.min(1, dt * 8));
     avatar.body.position.y = THREE.MathUtils.lerp(avatar.body.position.y, 0.35, Math.min(1, dt * 8));
+    return;
+  }
+
+  if (avatar.mountGroup) {
+    const activelyMoving = distanceMoved > 0.0015 || isMoving;
+    const isFlyingMount = avatar.mountWings.length > 0;
+    let rideBob = 0;
+
+    if (isFlyingMount) {
+      const flapFreq = activelyMoving ? 8.5 : 4.2;
+      const flapAmp = activelyMoving ? 0.56 : 0.28;
+      const flapAngle = Math.sin(time * flapFreq) * flapAmp;
+      if (avatar.mountWings[0]) avatar.mountWings[0].rotation.z = -flapAngle;
+      if (avatar.mountWings[1]) avatar.mountWings[1].rotation.z = flapAngle;
+      const hoverLift = 0.25 + Math.sin(time * flapFreq) * 0.14;
+      avatar.mountGroup.position.y = hoverLift;
+      rideBob = hoverLift;
+    } else {
+      const gallopFreq = activelyMoving ? 13.0 : 2.5;
+      if (activelyMoving) {
+        for (let i = 0; i < avatar.mountLegs.length; i++) {
+          const phase = i === 0 || i === 3 ? 0 : Math.PI;
+          avatar.mountLegs[i].rotation.x = Math.sin(time * gallopFreq + phase) * 0.58;
+        }
+        rideBob = Math.abs(Math.sin(time * gallopFreq)) * 0.14;
+      } else {
+        for (const leg of avatar.mountLegs) {
+          leg.rotation.x = THREE.MathUtils.lerp(leg.rotation.x, 0, Math.min(1, dt * 10));
+        }
+        rideBob = Math.sin(time * 2.5) * 0.03;
+      }
+      avatar.mountGroup.position.y = 0;
+    }
+
+    // Seat rider cleanly atop the mount
+    avatar.body.rotation.x = THREE.MathUtils.lerp(avatar.body.rotation.x, activelyMoving ? 0.12 : 0.03, Math.min(1, dt * 12));
+    avatar.body.rotation.y = THREE.MathUtils.lerp(avatar.body.rotation.y, 0, Math.min(1, dt * 12));
+    avatar.body.position.z = THREE.MathUtils.lerp(avatar.body.position.z, 0, Math.min(1, dt * 12));
+    avatar.body.position.y = THREE.MathUtils.lerp(avatar.body.position.y, avatar.mountSeatY + rideBob, Math.min(1, dt * 18));
+
+    if (avatar.fbxRoot && avatar.fbxMixer && avatar.fbxWalkAction) {
+      avatar.boneAnimator?.restoreBasePose();
+      avatar.fbxWalkAction.paused = true;
+      avatar.fbxWalkAction.time = 0.28;
+      avatar.fbxMixer.update(0);
+      avatar.equipmentRig?.update(dt, time);
+    } else {
+      avatar.leftLeg.rotation.x = THREE.MathUtils.lerp(avatar.leftLeg.rotation.x, -0.35, Math.min(1, dt * 10));
+      avatar.rightLeg.rotation.x = THREE.MathUtils.lerp(avatar.rightLeg.rotation.x, -0.35, Math.min(1, dt * 10));
+      avatar.leftArm.rotation.x = THREE.MathUtils.lerp(avatar.leftArm.rotation.x, -0.45, Math.min(1, dt * 10));
+      avatar.rightArm.rotation.x = THREE.MathUtils.lerp(avatar.rightArm.rotation.x, -0.45, Math.min(1, dt * 10));
+    }
+
     return;
   }
 

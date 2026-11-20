@@ -256,6 +256,11 @@
         display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
     }
     .char-sheet-btn.has-points { animation: pulseGold 1.4s infinite; }
+    .mount-toggle-btn { border-color: rgba(251, 146, 60, 0.55); color: #fed7aa; }
+    .mount-toggle-btn.mounted {
+        background: rgba(234, 88, 12, 0.35); border-color: #fb923c; color: #fef08a;
+        box-shadow: 0 0 12px rgba(251, 146, 60, 0.45);
+    }
     @keyframes pulseGold { 0%,100% { box-shadow: 0 0 0 0 rgba(250,204,21,0.5); } 50% { box-shadow: 0 0 14px 3px rgba(250,204,21,0.55); } }
     .xp-bar { margin-top: 8px; height: 10px; background: rgba(0,0,0,0.6); border-radius: 99px; overflow: hidden; position: relative; border: 1px solid rgba(255,255,255,0.1); }
     .xp-fill { height: 100%; background: linear-gradient(90deg, #9333ea, #c084fc, #facc15); transition: width 0.3s ease; }
@@ -498,9 +503,13 @@
                 <button type="button" class="skill-upgrade-btn" data-upgrade-slot="4" id="skill-upgrade-4">▲ +1</button>
                 <button type="button" class="skill-btn" data-slot="4" id="skill-slot-4"></button>
             </div>
-            <button type="button" class="char-sheet-btn" id="btn-char-sheet" title="Fiche Personnage (C)">
+            <button type="button" class="char-sheet-btn mount-toggle-btn" id="btn-mount-toggle" title="Monter / Descendre de monture (C)">
+                <span>🐎 Monture</span>
+                <small id="mount-key-badge">[C]</small>
+            </button>
+            <button type="button" class="char-sheet-btn" id="btn-char-sheet" title="Fiche Personnage (P)">
                 <span>Stats</span>
-                <small id="stat-pts-badge">[C]</small>
+                <small id="stat-pts-badge">[P]</small>
             </button>
             <button type="button" class="char-sheet-btn" id="btn-bag-modal" style="border-color:rgba(94,234,212,0.5); color:#5eead4;" title="Sac & Équipement (I)">
                 <span>🎒 Sac</span>
@@ -531,10 +540,10 @@
 
     <!-- Bottom Right: Controls -->
     <div class="hud-box hud-controls">
-        <div><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> Marcher · <kbd>Shift</kbd> Sprint · <kbd>Espace</kbd> Sauter</div>
+        <div><kbd>Z</kbd><kbd>Q</kbd><kbd>S</kbd><kbd>D</kbd> Marcher · <kbd>Shift</kbd> Sprint · <kbd>Espace</kbd> Sauter / Monter (Vol) · <kbd>Ctrl</kbd> Descendre</div>
         <div><kbd>Clic droit</kbd> Caméra · <kbd>Molette</kbd> Zoom</div>
         <div><kbd>Tab</kbd> / <kbd>Clic G.</kbd> Cibler &amp; Auto-attaque · <kbd>1</kbd>-<kbd>4</kbd> Sorts</div>
-        <div><kbd>F</kbd> Interagir (PNJ / Loot) · <kbd>I</kbd> Sac · <kbd>C</kbd> Stats</div>
+        <div><kbd>F</kbd> Interagir (PNJ / Loot) · <kbd>C</kbd> Monture · <kbd>I</kbd> Sac · <kbd>P</kbd> Stats</div>
     </div>
 </div>
 
@@ -589,7 +598,7 @@
     <div class="modal-card" style="width:470px; max-width:94vw; max-height:86vh; overflow-y:auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
             <h2 style="margin:0; font-size:1.2rem;">Fiche de <span id="modal-char-name"></span></h2>
-            <button type="button" class="mini-btn" id="btn-close-char-modal">Fermer (C)</button>
+            <button type="button" class="mini-btn" id="btn-close-char-modal">Fermer (P)</button>
         </div>
         <div style="font-size:0.88rem; color:var(--text-muted); margin-bottom:12px;">
             Niveau <strong id="modal-lvl" style="color:#fde047;">1</strong> ·

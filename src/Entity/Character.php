@@ -143,6 +143,9 @@ class Character
     #[ORM\Column(type: 'json', options: ['default' => '{}'])]
     private array $botState = [];
 
+    #[ORM\Column(length: 40, nullable: true)]
+    private ?string $activeMountCode = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -650,6 +653,18 @@ class Character
     public function setBotState(array $botState): self
     {
         $this->botState = $botState;
+
+        return $this;
+    }
+
+    public function getActiveMountCode(): ?string
+    {
+        return $this->activeMountCode;
+    }
+
+    public function setActiveMountCode(?string $activeMountCode): self
+    {
+        $this->activeMountCode = $activeMountCode;
 
         return $this;
     }

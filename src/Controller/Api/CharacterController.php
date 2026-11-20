@@ -9,6 +9,7 @@ use App\Entity\User;
 use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\ZoneRepository;
+use App\Service\Game\InventoryService;
 use App\Service\Game\LevelingService;
 use App\Service\Game\QuestService;
 use App\Service\Game\ReunionTerrainService;
@@ -123,6 +124,7 @@ final class CharacterController extends AbstractController
         $stats = $statCalculator->compute($character, $now);
 
         $character->setIsDead(false)
+            ->setActiveMountCode(null)
             ->setCurrentHp((int) round($stats['maxHp'] * 0.65))
             ->setCurrentMp((int) round($stats['maxMp'] * 0.65))
             ->setPosX($safe['x'])
@@ -175,7 +177,8 @@ final class CharacterController extends AbstractController
         }
 
         $dest = $terrainService->findNearestWalkable($zones[$zoneCode]['respawnX'], $zones[$zoneCode]['respawnZ']);
-        $character->setPosX($dest['x'])
+        $character->setActiveMountCode(null)
+            ->setPosX($dest['x'])
             ->setPosY($dest['y'])
             ->setPosZ($dest['z'])
             ->setZoneCode($zoneCode)
@@ -189,5 +192,37 @@ final class CharacterController extends AbstractController
             'self' => $payloadBuilder->buildSelf($character, $now),
             'quests' => $questService->buildQuestState($character),
         ]);
+    }
+
+    /**
+     * Toggles the equipped/owned mount on or off (shortcut key C).
+     */
+    #[Route('/api/character/mount/toggle', name: 'api_character_mount_toggle', methods: ['POST'])]
+    public function toggleMount(
+        Request $request,
+        CharacterRepository $characterRepository,
+        InventoryService $inventoryService,
+        StatePayloadBuilder $payloadBuilder,
+    ): JsonResponse {
+        /** @var User $user */
+        $user = $this->getUser();
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return $this->json(['ok' => false, 'error' => 'Requête invalide'], 400);
+        }
+
+        $character = $characterRepository->find((int) ($data['characterId'] ?? 0));
+        if (!$character instanceof Character || $character->getOwner()->getId() !== $user->getId()) {
+            return $this->json(['ok' => false, 'error' => 'Personnage non autorisé'], 403);
+        }
+
+        $res = $inventoryService->toggleMount($character);
+        $now = microtime(true);
+
+        return $this->json([
+            ...$res,
+            'self' => $payloadBuilder->buildSelf($character, $now),
+            'inventory' => $inventoryService->buildInventoryState($character),
+        ], $res['ok'] ? 200 : 422);
     }
 }

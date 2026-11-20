@@ -301,6 +301,14 @@ final class InventoryService
         }
 
         $current = $this->itemRepository->findEquippedInSlot($character, $def->slot);
+        if ($def->slot === ItemDefinition::SLOT_MOUNT && $character->getActiveMountCode() !== null) {
+            $activeDef = $this->itemRegistry->get($character->getActiveMountCode());
+            if ($activeDef !== null && $activeDef->mountCanFly && !$def->mountCanFly && !$this->terrainService->isWalkable($character->getPosX(), $character->getPosZ())) {
+                return ['ok' => false, 'error' => 'Posez-vous sur un terrain praticable avant de changer de monture.'];
+            }
+            $character->setActiveMountCode($def->code);
+        }
+
         if ($current instanceof CharacterItem) {
             $current->setEquippedSlot(null);
         }
@@ -330,6 +338,15 @@ final class InventoryService
 
         if ($this->countBagSlots($character) >= self::MAX_BAG_SLOTS) {
             return ['ok' => false, 'error' => 'Votre sac est plein (24/24).'];
+        }
+
+        if ($slot === ItemDefinition::SLOT_MOUNT && $character->getActiveMountCode() !== null) {
+            $activeDef = $this->itemRegistry->get($character->getActiveMountCode());
+            if ($activeDef !== null && $activeDef->mountCanFly && !$this->terrainService->isWalkable($character->getPosX(), $character->getPosZ())) {
+                return ['ok' => false, 'error' => 'Posez-vous sur un terrain praticable avant de retirer votre monture volante.'];
+            }
+            $character->setActiveMountCode(null);
+            $character->setPosY($this->terrainService->getHeight($character->getPosX(), $character->getPosZ()));
         }
 
         $current->setEquippedSlot(null);
@@ -537,6 +554,17 @@ final class InventoryService
             return ['ok' => false, 'error' => 'Article indisponible.'];
         }
 
+        if ($def->isMount()) {
+            if ($character->getLevel() < $def->minLevel) {
+                return ['ok' => false, 'error' => sprintf('Niveau %d requis pour débloquer %s.', $def->minLevel, $def->name)];
+            }
+            foreach ($this->itemRepository->findAllForCharacter($character) as $owned) {
+                if ($owned->getItemCode() === $itemCode) {
+                    return ['ok' => false, 'error' => 'Vous possédez déjà cette monture.'];
+                }
+            }
+        }
+
         if ($character->getGold() < $def->buyPrice) {
             return ['ok' => false, 'error' => sprintf('Or insuffisant (%d requis).', $def->buyPrice)];
         }
@@ -546,12 +574,123 @@ final class InventoryService
         }
 
         $character->setGold($character->getGold() - $def->buyPrice);
+
+        // Auto-equip newly bought mounts if empty or strictly higher tier than current mount
+        if ($def->isMount()) {
+            $newMountItem = null;
+            foreach ($character->getItems() as $ci) {
+                if (!$ci->isEquipped() && $ci->getItemCode() === $itemCode) {
+                    $newMountItem = $ci;
+                    break;
+                }
+            }
+            if ($newMountItem instanceof CharacterItem) {
+                $current = $this->itemRepository->findEquippedInSlot($character, ItemDefinition::SLOT_MOUNT);
+                $currentDef = $current ? $this->itemRegistry->get($current->getItemCode()) : null;
+                if (!$current instanceof CharacterItem || ($currentDef !== null && $this->mountTierScore($def) > $this->mountTierScore($currentDef))) {
+                    if ($current instanceof CharacterItem) {
+                        $current->setEquippedSlot(null);
+                    }
+                    $newMountItem->setEquippedSlot(ItemDefinition::SLOT_MOUNT);
+                    if ($character->getActiveMountCode() !== null) {
+                        $character->setActiveMountCode($def->code);
+                    }
+                }
+            }
+        }
+
         $this->em->flush();
 
         return [
             'ok' => true,
             'itemName' => $def->name,
             'cost' => $def->buyPrice,
+        ];
+    }
+
+    /**
+     * Toggles the character's mount on/off (shortcut key C).
+     *
+     * @return array{ok: bool, error?: string, mounted?: bool, mountCode?: ?string, mountName?: ?string, speedBonus?: float, canFly?: bool}
+     */
+    public function toggleMount(Character $character): array
+    {
+        if ($character->isDead()) {
+            return ['ok' => false, 'error' => 'Impossible d\'utiliser une monture en étant vaincu.'];
+        }
+
+        $activeCode = $character->getActiveMountCode();
+        if ($activeCode !== null) {
+            $curDef = $this->itemRegistry->get($activeCode);
+            if ($curDef !== null && $curDef->mountCanFly && !$this->terrainService->isWalkable($character->getPosX(), $character->getPosZ())) {
+                return ['ok' => false, 'error' => 'Survolez un terrain praticable avant de descendre de votre monture volante !'];
+            }
+
+            $character->setActiveMountCode(null);
+            $character->setPosY($this->terrainService->getHeight($character->getPosX(), $character->getPosZ()));
+            $this->em->flush();
+
+            return [
+                'ok' => true,
+                'mounted' => false,
+                'mountCode' => null,
+                'mountName' => null,
+                'speedBonus' => 0.0,
+                'canFly' => false,
+            ];
+        }
+
+        $equippedMount = $this->itemRepository->findEquippedInSlot($character, ItemDefinition::SLOT_MOUNT);
+        $def = $equippedMount ? $this->itemRegistry->get($equippedMount->getItemCode()) : null;
+
+        if ($def === null || !$def->isMount()) {
+            $bestBagItem = null;
+            $bestBagDef = null;
+            $lockedDef = null;
+
+            foreach ($this->itemRepository->findBagItemsForCharacter($character) as $ci) {
+                $candDef = $this->itemRegistry->get($ci->getItemCode());
+                if ($candDef === null || !$candDef->isMount()) {
+                    continue;
+                }
+                if ($character->getLevel() < $candDef->minLevel) {
+                    if ($lockedDef === null || $this->mountTierScore($candDef) > $this->mountTierScore($lockedDef)) {
+                        $lockedDef = $candDef;
+                    }
+                    continue;
+                }
+                if ($bestBagDef === null || $this->mountTierScore($candDef) > $this->mountTierScore($bestBagDef)) {
+                    $bestBagItem = $ci;
+                    $bestBagDef = $candDef;
+                }
+            }
+
+            if (!$bestBagItem instanceof CharacterItem || $bestBagDef === null) {
+                if ($lockedDef !== null) {
+                    return ['ok' => false, 'error' => sprintf('Niveau %d requis pour chevaucher %s.', $lockedDef->minLevel, $lockedDef->name)];
+                }
+
+                return ['ok' => false, 'error' => 'Aucune monture possédée. Achetez-en une auprès d\'un PNJ (touche F) !'];
+            }
+
+            $bestBagItem->setEquippedSlot(ItemDefinition::SLOT_MOUNT);
+            $def = $bestBagDef;
+        }
+
+        if ($character->getLevel() < $def->minLevel) {
+            return ['ok' => false, 'error' => sprintf('Niveau %d requis pour chevaucher %s.', $def->minLevel, $def->name)];
+        }
+
+        $character->setActiveMountCode($def->code);
+        $this->em->flush();
+
+        return [
+            'ok' => true,
+            'mounted' => true,
+            'mountCode' => $def->code,
+            'mountName' => $def->name,
+            'speedBonus' => $def->mountSpeedBonus,
+            'canFly' => $def->mountCanFly,
         ];
     }
 
@@ -569,6 +708,7 @@ final class InventoryService
             ItemDefinition::SLOT_ARMOR => null,
             ItemDefinition::SLOT_HELM => null,
             ItemDefinition::SLOT_ACCESSORY => null,
+            ItemDefinition::SLOT_MOUNT => null,
         ];
         $bag = [];
 
@@ -634,6 +774,11 @@ final class InventoryService
         }
 
         return $count;
+    }
+
+    private function mountTierScore(ItemDefinition $def): int
+    {
+        return ($def->mountCanFly ? 1000 : 0) + (int) round($def->mountSpeedBonus * 100);
     }
 
     private function clampVitalsToMax(Character $character): void
