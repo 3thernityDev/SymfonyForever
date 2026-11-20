@@ -97,4 +97,35 @@ final class ReunionTerrainServiceTest extends KernelTestCase
             sprintf('La traversée d\'un bout à l\'autre de l\'île doit prendre >= 10 min à pied (mesuré: %.1fs).', $coastToCoastSeconds),
         );
     }
+
+    public function testAllLevelingZoneTrailsAreDefinedAndWalkable(): void
+    {
+        $trails = WorldCatalog::trails();
+        self::assertCount(7, $trails);
+
+        foreach ($trails as $trailIdx => $trail) {
+            self::assertGreaterThanOrEqual(4, count($trail));
+            for ($i = 0; $i < count($trail); ++$i) {
+                $pt = $trail[$i];
+                self::assertLessThan(WorldCatalog::HALF_WORLD, abs($pt['x']));
+                self::assertLessThan(WorldCatalog::HALF_WORLD, abs($pt['z']));
+                self::assertGreaterThan(
+                    WorldCatalog::SEA_LEVEL,
+                    $this->terrain->getHeight($pt['x'], $pt['z']),
+                    sprintf('Point #%d du sentier #%d doit être au-dessus du niveau de la mer.', $i, $trailIdx),
+                );
+
+                if ($i < count($trail) - 1) {
+                    $next = $trail[$i + 1];
+                    $midX = ($pt['x'] + $next['x']) * 0.5;
+                    $midZ = ($pt['z'] + $next['z']) * 0.5;
+                    self::assertGreaterThan(
+                        WorldCatalog::SEA_LEVEL,
+                        $this->terrain->getHeight($midX, $midZ),
+                        sprintf('Milieu du segment #%d du sentier #%d doit être au-dessus de la mer.', $i, $trailIdx),
+                    );
+                }
+            }
+        }
+    }
 }

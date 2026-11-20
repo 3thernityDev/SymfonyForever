@@ -202,6 +202,7 @@ class SymfonyForeverGame {
         this.manifest.landmarks,
         this.manifest.zones,
         this.manifest.npcs,
+        this.manifest.trails,
       );
       this.weatherSystem = new WeatherSystem(this.scene);
       this.vfx = new VfxManager(this.scene, this.floatingLayer);

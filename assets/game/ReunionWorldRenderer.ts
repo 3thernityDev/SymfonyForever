@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TerrainSampler } from './TerrainSampler';
-import type { LandmarkMeta, NpcData, ZoneMeta } from './types';
+import type { LandmarkMeta, NpcData, TrailPoint, ZoneMeta } from './types';
 import { createSoftParticleTexture, type WeatherFrameFactors } from './WeatherSystem';
 
 export interface AtmosphereFrameResult {
@@ -110,6 +110,7 @@ export class ReunionWorldRenderer {
     landmarks: LandmarkMeta[],
     zones?: Record<string, ZoneMeta>,
     npcs?: NpcData[],
+    trails?: TrailPoint[][],
   ) {
     this.scene = scene;
 
@@ -353,12 +354,12 @@ export class ReunionWorldRenderer {
     this.populateVegetationAndRocks(sampler, clearZones);
     this.buildCoastalPiroguesAndFeatures(sampler, bossX, bossZ, hubX, hubZ);
     this.buildAllZoneVillagesAndLandmarks(sampler, landmarks, zones, npcs, hubX, hubZ);
-    this.scatterTrailTorches(sampler, clearZones);
+    this.placeRoadsideTrailTorches(sampler, trails, zones, npcs, bossX, bossZ);
     this.renderTorchInstances();
 
-    // Pool of 8 dynamic PointLights bound dynamically to nearest torches/campfires around player
-    for (let i = 0; i < 8; i++) {
-      const pl = new THREE.PointLight(0xff8c32, 0, 52, 1.5);
+    // Pool of 10 dynamic PointLights bound dynamically to nearest torches/campfires around player
+    for (let i = 0; i < 10; i++) {
+      const pl = new THREE.PointLight(0xff8c32, 0, 64, 1.15);
       scene.add(pl);
       this.torchLightPool.push(pl);
     }
@@ -610,20 +611,21 @@ export class ReunionWorldRenderer {
       const dx = t.x - playerPos.x;
       const dz = t.z - playerPos.z;
       const d2 = dx * dx + dz * dz;
-      if (d2 <= 180 * 180) {
+      if (d2 <= 220 * 220) {
         scored.push({ d2, t });
       }
     }
     scored.sort((a, b) => a.d2 - b.d2);
 
-    const baseStrength = 0.28 + goldenFactor * 1.6 + nightFactor * 6.2;
+    const baseStrength = 0.32 + goldenFactor * 1.85 + nightFactor * 7.2;
     for (let i = 0; i < this.torchLightPool.length; i++) {
       const pl = this.torchLightPool[i];
       if (i < scored.length) {
         const site = scored[i].t;
         const flick = 0.85 + Math.sin(elapsed * 10.2 + site.phase) * 0.12 + Math.cos(elapsed * 17.1 + site.phase) * 0.08;
         pl.position.set(site.x, site.y + (site.isCampfire ? 1.6 : 3.6), site.z);
-        pl.distance = site.isCampfire ? 62 : 48;
+        pl.distance = site.isCampfire ? 78 : 64;
+        pl.decay = 1.15;
         pl.intensity = baseStrength * (site.isCampfire ? 1.35 : 1.0) * flick;
       } else {
         pl.intensity = 0;
@@ -1035,29 +1037,92 @@ export class ReunionWorldRenderer {
     this.torchSites.push({ x, y, z, isCampfire: true, phase });
   }
 
-  private scatterTrailTorches(sampler: TerrainSampler, clearZones: { x: number; z: number; r: number }[]): void {
+  private placeRoadsideTrailTorches(
+    sampler: TerrainSampler,
+    trails: TrailPoint[][] | undefined,
+    zones: Record<string, ZoneMeta> | undefined,
+    npcs: NpcData[] | undefined,
+    bossX: number,
+    bossZ: number,
+  ): void {
+    const zoneRespawns = zones ? Object.values(zones) : [];
     let placed = 0;
-    const minDist = 125;
-    const roadSites: { x: number; z: number }[] = [];
 
-    for (let gz = -3200; gz <= 3200 && placed < 180; gz += 75) {
-      for (let gx = -3200; gx <= 3200 && placed < 180; gx += 75) {
-        const trail = sampler.getTrail(gx, gz);
-        if (trail < 92) continue;
-        const h = sampler.getHeight(gx, gz);
-        if (h <= sampler.seaLevel + 1.5 || sampler.getSlope(gx, gz) > 0.65) continue;
-        if (this.isInsideClearZone(gx, gz, clearZones)) continue;
-
-        let tooClose = false;
-        for (const rs of roadSites) {
-          if (Math.hypot(rs.x - gx, rs.z - gz) < minDist) {
-            tooClose = true;
-            break;
-          }
+    const tryHeight = (tx: number, tz: number, minTorchDistSq: number): number | null => {
+      const h = sampler.getHeight(tx, tz);
+      if (h <= sampler.seaLevel + 1.0 || sampler.getSlope(tx, tz) > 1.25) return null;
+      if (Math.hypot(tx - bossX, tz - bossZ) < 62) return null;
+      for (const z of zoneRespawns) {
+        if (Math.hypot(tx - z.respawnX, tz - z.respawnZ) < 14) return null;
+      }
+      if (npcs) {
+        for (const npc of npcs) {
+          if (Math.hypot(tx - npc.x, tz - npc.z) < 5.5) return null;
         }
-        if (tooClose) continue;
+      }
+      for (let i = 0; i < this.torchSites.length; i++) {
+        const existing = this.torchSites[i];
+        const dx = tx - existing.x;
+        const dz = tz - existing.z;
+        if (dx * dx + dz * dz < minTorchDistSq) return null;
+      }
+      return h;
+    };
 
-        roadSites.push({ x: gx, z: gz });
+    if (trails && trails.length > 0) {
+      const spacing = 40.0;
+      const lateralOffset = 8.5;
+      const minTorchDistSq = 24 * 24;
+      let side = 1;
+
+      for (const line of trails) {
+        if (line.length < 2) continue;
+        let distToNext = spacing * 0.5;
+        for (let i = 0; i < line.length - 1; i++) {
+          const a = line[i];
+          const b = line[i + 1];
+          const segDx = b.x - a.x;
+          const segDz = b.z - a.z;
+          const segLen = Math.hypot(segDx, segDz);
+          if (segLen < 0.001) continue;
+
+          const dirX = segDx / segLen;
+          const dirZ = segDz / segLen;
+          const perpX = -dirZ;
+          const perpZ = dirX;
+
+          let cursor = distToNext;
+          while (cursor <= segLen) {
+            const px = a.x + dirX * cursor;
+            const pz = a.z + dirZ * cursor;
+
+            for (const lat of [side * lateralOffset, -side * lateralOffset, 0.0]) {
+              const tx = px + perpX * lat;
+              const tz = pz + perpZ * lat;
+              const ty = tryHeight(tx, tz, minTorchDistSq);
+              if (ty !== null) {
+                this.torchSites.push({ x: tx, y: ty, z: tz, isCampfire: false, phase: placed * 0.77 });
+                placed++;
+                break;
+              }
+            }
+
+            side *= -1;
+            cursor += spacing;
+          }
+          distToNext = cursor - segLen;
+        }
+      }
+      return;
+    }
+
+    // Fallback scan if trail polylines are absent
+    const minDistSq = 42 * 42;
+    for (let gz = -3200; gz <= 3200 && placed < 320; gz += 40) {
+      for (let gx = -3200; gx <= 3200 && placed < 320; gx += 40) {
+        if (sampler.getTrail(gx, gz) < 92) continue;
+        const h = tryHeight(gx, gz, minDistSq);
+        if (h === null) continue;
         this.torchSites.push({ x: gx, y: h, z: gz, isCampfire: false, phase: placed * 0.77 });
         placed++;
       }
@@ -1076,6 +1141,14 @@ export class ReunionWorldRenderer {
       postSites.length,
     );
 
+    const brazierGeo = new THREE.CylinderGeometry(0.28, 0.14, 0.34, 6);
+    brazierGeo.translate(0, 3.18, 0);
+    const brazierMesh = new THREE.InstancedMesh(
+      brazierGeo,
+      new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.65, metalness: 0.45, flatShading: true }),
+      postSites.length,
+    );
+
     const flameGeo = new THREE.ConeGeometry(0.28, 0.75, 5);
     flameGeo.translate(0, 3.45, 0);
     const flameMesh = new THREE.InstancedMesh(flameGeo, this.torchFlameMat, postSites.length);
@@ -1086,12 +1159,14 @@ export class ReunionWorldRenderer {
       this.dummy.scale.set(1, 1, 1);
       this.dummy.updateMatrix();
       postMesh.setMatrixAt(idx, this.dummy.matrix);
+      brazierMesh.setMatrixAt(idx, this.dummy.matrix);
       flameMesh.setMatrixAt(idx, this.dummy.matrix);
     });
 
     postMesh.instanceMatrix.needsUpdate = true;
+    brazierMesh.instanceMatrix.needsUpdate = true;
     flameMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(postMesh, flameMesh);
+    this.scene.add(postMesh, brazierMesh, flameMesh);
   }
 
   private createVolcanoEmbers(bossX: number, bossZ: number): THREE.Points {

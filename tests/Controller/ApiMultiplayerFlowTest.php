@@ -42,6 +42,14 @@ final class ApiMultiplayerFlowTest extends WebTestCase
         $manifest = json_decode((string) $this->client->getResponse()->getContent(), true);
         self::assertSame('SymfonyForever', $manifest['gameTitle']);
         self::assertCount(7, $manifest['zones']);
+        self::assertCount(7, $manifest['trails']);
+        foreach ($manifest['trails'] as $trail) {
+            self::assertGreaterThanOrEqual(4, count($trail));
+            foreach ($trail as $pt) {
+                self::assertArrayHasKey('x', $pt);
+                self::assertArrayHasKey('z', $pt);
+            }
+        }
         self::assertCount(3, $manifest['classes']);
         self::assertCount(12, $manifest['skills']);
 

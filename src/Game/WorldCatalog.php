@@ -182,4 +182,48 @@ final class WorldCatalog
             ['name' => 'Sud Sauvage', 'x' => self::scaleCoord(190.0), 'z' => self::scaleCoord(520.0), 'type' => 'zone'],
         ];
     }
+
+    /**
+     * Authoritative trail polylines (base map units) connecting the 7 leveling zones across La Réunion.
+     *
+     * @return list<list<array{0: float, 1: float}>>
+     */
+    public static function baseTrails(): array
+    {
+        return [
+            // Saint-Gilles Hub -> Col des Boeufs -> Cirque de Mafate
+            [[-585.0, -95.0], [-490.0, -145.0], [-405.0, -210.0], [-320.0, -230.0], [-250.0, -240.0]],
+            // Mafate -> Col de Fourche -> Cirque de Salazie
+            [[-250.0, -240.0], [-140.0, -270.0], [-30.0, -305.0], [45.0, -300.0], [95.0, -290.0]],
+            // Saint-Gilles Hub -> Côte Ouest -> Gorges de Cilaos -> Cirque de Cilaos
+            [[-585.0, -95.0], [-545.0, 20.0], [-470.0, 140.0], [-350.0, 225.0], [-230.0, 215.0], [-130.0, 145.0]],
+            // Cilaos -> Piton des Neiges summit trail
+            [[-130.0, 145.0], [-130.0, 65.0], [-105.0, 0.0], [-75.0, -65.0]],
+            // Salazie -> Bélouve -> Piton des Neiges
+            [[95.0, -290.0], [45.0, -210.0], [-15.0, -135.0], [-75.0, -65.0]],
+            // Cilaos -> Plaine des Cafres -> Plaine des Sables -> Piton de la Fournaise crater
+            [[-130.0, 145.0], [-10.0, 190.0], [115.0, 205.0], [240.0, 215.0], [345.0, 240.0], [440.0, 275.0]],
+            // Cilaos -> Sud Sauvage -> Fournaise flank
+            [[-130.0, 145.0], [-70.0, 310.0], [40.0, 445.0], [175.0, 505.0], [285.0, 440.0], [340.0, 315.0]],
+        ];
+    }
+
+    /**
+     * World-scaled trail polylines connecting the 7 leveling zones across La Réunion.
+     *
+     * @return list<list<array{x: float, z: float}>>
+     */
+    public static function trails(): array
+    {
+        return array_map(
+            static fn (array $line): array => array_map(
+                static fn (array $pt): array => [
+                    'x' => self::scaleCoord($pt[0]),
+                    'z' => self::scaleCoord($pt[1]),
+                ],
+                $line,
+            ),
+            self::baseTrails(),
+        );
+    }
 }

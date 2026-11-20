@@ -70,6 +70,11 @@ export interface LandmarkMeta {
   type: string;
 }
 
+export interface TrailPoint {
+  x: number;
+  z: number;
+}
+
 export interface NpcData {
   code: string;
   name: string;
@@ -204,6 +209,7 @@ export interface ManifestResponse {
   };
   zones: Record<string, ZoneMeta>;
   landmarks: LandmarkMeta[];
+  trails?: TrailPoint[][];
   npcs: NpcData[];
   quests: Record<string, QuestDefinitionData>;
   items: Record<string, ItemDefinitionData>;

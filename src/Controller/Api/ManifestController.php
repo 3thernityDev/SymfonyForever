@@ -57,6 +57,7 @@ final class ManifestController extends AbstractController
             ],
             'zones' => WorldCatalog::zones(),
             'landmarks' => WorldCatalog::landmarks(),
+            'trails' => WorldCatalog::trails(),
             'npcs' => $npcRegistry->toManifestArray($terrainService),
             'quests' => $questRegistry->toManifestArray(),
             'items' => $itemRegistry->toManifestArray(),
