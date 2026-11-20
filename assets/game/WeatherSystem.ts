@@ -41,12 +41,18 @@ export class WeatherSystem {
   private readonly rainMat: THREE.LineBasicMaterial;
   private readonly rainLines: THREE.LineSegments;
 
-  private readonly sandCount = 2200;
+  private readonly sandCount = 2600;
   private readonly sandBoxW = 88;
-  private readonly sandBoxH = 38;
+  private readonly sandBoxH = 34;
   private readonly sandOffsets: Float32Array;
   private readonly sandSpeeds: Float32Array;
-  private readonly sandPositions: Float32Array;
+  private readonly sandStreakLengths: Float32Array;
+  private readonly sandLinePositions: Float32Array;
+  private readonly sandLineMat: THREE.LineBasicMaterial;
+  private readonly sandWindLines: THREE.LineSegments;
+
+  private readonly microDustCount = 1200;
+  private readonly microDustPositions: Float32Array;
   private readonly sandMat: THREE.PointsMaterial;
   private readonly sandPoints: THREE.Points;
 
@@ -88,24 +94,61 @@ export class WeatherSystem {
     this.rainLines.visible = false;
     scene.add(this.rainLines);
 
-    // 2. Volcanic sandstorm / Piton dust gusts
+    // 2. Volcanic sandstorm / Piton wind & fine sand filaments (replace coarse round blobs with fine wind streaks + micro-dust)
     this.sandOffsets = new Float32Array(this.sandCount * 3);
     this.sandSpeeds = new Float32Array(this.sandCount);
-    this.sandPositions = new Float32Array(this.sandCount * 3);
+    this.sandStreakLengths = new Float32Array(this.sandCount);
+    this.sandLinePositions = new Float32Array(this.sandCount * 6);
+    const sandLineColors = new Float32Array(this.sandCount * 6);
+
+    const cHeadWind = new THREE.Color(0xf2cfa6);
+    const cHeadSand = new THREE.Color(0xd99b5e);
+    const cTail = new THREE.Color(0x7c4d25);
+    const tmpHead = new THREE.Color();
 
     for (let i = 0; i < this.sandCount; i++) {
       this.sandOffsets[i * 3] = (Math.random() - 0.5) * this.sandBoxW;
-      this.sandOffsets[i * 3 + 1] = Math.random() * this.sandBoxH;
+      // Concentrate more wind & sand closer to ground while keeping upper gusts
+      this.sandOffsets[i * 3 + 1] = Math.pow(Math.random(), 1.35) * this.sandBoxH;
       this.sandOffsets[i * 3 + 2] = (Math.random() - 0.5) * this.sandBoxW;
-      this.sandSpeeds[i] = 34 + Math.random() * 20;
+
+      const isLongWindFilament = i % 4 === 0;
+      this.sandSpeeds[i] = isLongWindFilament ? 48 + Math.random() * 24 : 32 + Math.random() * 20;
+      this.sandStreakLengths[i] = isLongWindFilament
+        ? 0.052 + Math.random() * 0.035
+        : 0.015 + Math.random() * 0.018;
+
+      tmpHead.copy(isLongWindFilament ? cHeadWind : cHeadSand).offsetHSL(0, 0, (Math.random() - 0.5) * 0.08);
+      const cIdx = i * 6;
+      sandLineColors[cIdx] = tmpHead.r;
+      sandLineColors[cIdx + 1] = tmpHead.g;
+      sandLineColors[cIdx + 2] = tmpHead.b;
+      sandLineColors[cIdx + 3] = cTail.r;
+      sandLineColors[cIdx + 4] = cTail.g;
+      sandLineColors[cIdx + 5] = cTail.b;
     }
 
+    const sandLineGeo = new THREE.BufferGeometry();
+    sandLineGeo.setAttribute('position', new THREE.BufferAttribute(this.sandLinePositions, 3));
+    sandLineGeo.setAttribute('color', new THREE.BufferAttribute(sandLineColors, 3));
+    this.sandLineMat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    this.sandWindLines = new THREE.LineSegments(sandLineGeo, this.sandLineMat);
+    this.sandWindLines.frustumCulled = false;
+    this.sandWindLines.visible = false;
+    scene.add(this.sandWindLines);
+
+    this.microDustPositions = new Float32Array(this.microDustCount * 3);
     const sandGeo = new THREE.BufferGeometry();
-    sandGeo.setAttribute('position', new THREE.BufferAttribute(this.sandPositions, 3));
+    sandGeo.setAttribute('position', new THREE.BufferAttribute(this.microDustPositions, 3));
     this.sandMat = new THREE.PointsMaterial({
-      color: 0xd99352,
+      color: 0xe6b47e,
       map: tex,
-      size: 3.4,
+      size: 0.18,
       transparent: true,
       opacity: 0,
       depthWrite: false,
@@ -222,21 +265,29 @@ export class WeatherSystem {
       this.boltLine.visible = false;
     }
 
-    // Volcanic sandstorm simulation
+    // Volcanic sandstorm simulation: fine wind streaks + tiny micro-grains
     if (this.sandstormFactor > 0.01) {
+      this.sandWindLines.visible = true;
       this.sandPoints.visible = true;
-      this.sandMat.opacity = this.sandstormFactor * 0.42;
+      this.sandLineMat.opacity = this.sandstormFactor * 0.46;
+      this.sandMat.opacity = this.sandstormFactor * 0.30;
 
       const halfS = this.sandBoxW * 0.5;
-      const baseY = playerPos.y - 4;
+      const baseY = playerPos.y - 3.5;
+      const gustPulse = 0.92 + Math.sin(elapsed * 1.8) * 0.22 + Math.cos(elapsed * 3.1) * 0.12;
+
       for (let i = 0; i < this.sandCount; i++) {
         const idx3 = i * 3;
-        const sp = this.sandSpeeds[i];
-        const swirl = Math.sin(elapsed * 2.1 + i * 0.13);
+        const sp = this.sandSpeeds[i] * gustPulse;
+        const oxPrev = this.sandOffsets[idx3];
+        const ozPrev = this.sandOffsets[idx3 + 2];
 
-        let ox = this.sandOffsets[idx3] + sp * dt;
-        let oy = this.sandOffsets[idx3 + 1] + swirl * 4.2 * dt;
-        let oz = this.sandOffsets[idx3 + 2] + (sp * 0.42 + Math.cos(elapsed * 1.7 + i) * 6.0) * dt;
+        const waveY = Math.sin(elapsed * 3.2 + oxPrev * 0.09 + i * 0.13) * 3.6;
+        const waveZ = sp * 0.38 + Math.cos(elapsed * 2.4 + ozPrev * 0.08 + i * 0.07) * 7.5;
+
+        let ox = oxPrev + sp * dt;
+        let oy = this.sandOffsets[idx3 + 1] + waveY * dt;
+        let oz = ozPrev + waveZ * dt;
 
         if (ox > halfS) ox -= this.sandBoxW;
         if (ox < -halfS) ox += this.sandBoxW;
@@ -249,13 +300,30 @@ export class WeatherSystem {
         this.sandOffsets[idx3 + 1] = oy;
         this.sandOffsets[idx3 + 2] = oz;
 
-        this.sandPositions[idx3] = playerPos.x + ox;
-        this.sandPositions[idx3 + 1] = baseY + oy;
-        this.sandPositions[idx3 + 2] = playerPos.z + oz;
+        const wx = playerPos.x + ox;
+        const wy = baseY + oy;
+        const wz = playerPos.z + oz;
+
+        const streakDt = this.sandStreakLengths[i];
+        const idx6 = i * 6;
+        this.sandLinePositions[idx6] = wx;
+        this.sandLinePositions[idx6 + 1] = wy;
+        this.sandLinePositions[idx6 + 2] = wz;
+        this.sandLinePositions[idx6 + 3] = wx - sp * streakDt;
+        this.sandLinePositions[idx6 + 4] = wy - waveY * streakDt * 0.65;
+        this.sandLinePositions[idx6 + 5] = wz - waveZ * streakDt;
+
+        if (i < this.microDustCount) {
+          this.microDustPositions[idx3] = wx;
+          this.microDustPositions[idx3 + 1] = wy;
+          this.microDustPositions[idx3 + 2] = wz;
+        }
       }
 
+      (this.sandWindLines.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
       (this.sandPoints.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     } else {
+      this.sandWindLines.visible = false;
       this.sandPoints.visible = false;
     }
 
