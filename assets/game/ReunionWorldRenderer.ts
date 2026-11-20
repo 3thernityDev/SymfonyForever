@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  generateReunionTreeArchetypes,
+  type ProceduralTreeArchetype,
+  type ReunionTreeSpecies,
+} from './ReunionTreeGenerator';
 import { TerrainSampler } from './TerrainSampler';
 import type { LandmarkMeta, NpcData, TrailPoint, VillageMeta, ZoneMeta } from './types';
 import { createSoftParticleTexture, type WeatherFrameFactors } from './WeatherSystem';
@@ -710,8 +715,19 @@ export class ReunionWorldRenderer {
   }
 
   private populateVegetationAndRocks(sampler: TerrainSampler, clearZones: { x: number; z: number; r: number }[]): void {
-    const palmMatrices: THREE.Matrix4[] = [];
-    const treeMatrices: THREE.Matrix4[] = [];
+    const archetypes = generateReunionTreeArchetypes(9742026);
+    const bySpecies = new Map<ReunionTreeSpecies, number[]>();
+    archetypes.forEach((arch, idx) => {
+      const list = bySpecies.get(arch.species) ?? [];
+      list.push(idx);
+      bySpecies.set(arch.species, list);
+    });
+
+    const treeInstancesByArch: { matrix: THREE.Matrix4; woodTint: THREE.Color; leafTint: THREE.Color }[][] =
+      archetypes.map(() => []);
+    let totalCoastalTrees = 0;
+    let totalInlandTrees = 0;
+
     const bushMatrices: THREE.Matrix4[] = [];
     const flowerMatrices: THREE.Matrix4[] = [];
     const rockMatrices: THREE.Matrix4[] = [];
@@ -722,6 +738,24 @@ export class ReunionWorldRenderer {
     const rand = () => {
       seed = (seed * 1664525 + 1013904223) >>> 0;
       return seed / 4294967296;
+    };
+
+    const pickSpeciesVariant = (species: ReunionTreeSpecies): number => {
+      const indices = bySpecies.get(species) ?? [0];
+      return indices[Math.floor(rand() * indices.length)];
+    };
+
+    const pushTreeInstance = (species: ReunionTreeSpecies, sx: number, sy: number, sz: number) => {
+      const archIdx = pickSpeciesVariant(species);
+      dummy.scale.set(sx, sy, sz);
+      dummy.updateMatrix();
+      const woodTint = new THREE.Color(1, 1, 1).offsetHSL((rand() - 0.5) * 0.03, (rand() - 0.5) * 0.08, (rand() - 0.5) * 0.09);
+      const leafTint = new THREE.Color(1, 1, 1).offsetHSL((rand() - 0.5) * 0.045, (rand() - 0.5) * 0.1, (rand() - 0.5) * 0.1);
+      treeInstancesByArch[archIdx].push({
+        matrix: dummy.matrix.clone(),
+        woodTint,
+        leafTint,
+      });
     };
 
     for (let i = 0; i < 36000; i++) {
@@ -735,8 +769,8 @@ export class ReunionWorldRenderer {
       if (this.isInsideClearZone(wx, wz, clearZones)) continue;
 
       const biome = sampler.getBiome(wx, wz);
-      dummy.position.set(wx, h - 0.28, wz);
-      dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+      dummy.position.set(wx, h - 0.25, wz);
+      dummy.rotation.set((rand() - 0.5) * 0.06, rand() * Math.PI * 2, (rand() - 0.5) * 0.06);
 
       // Keep hiking trails mostly open, except small flowers beside trails
       if (trail > 80 && trail <= 115 && (biome >= 1 && biome <= 4) && flowerMatrices.length < 2000 && rand() < 0.35) {
@@ -748,16 +782,71 @@ export class ReunionWorldRenderer {
       }
       if (trail > 90) continue;
 
-      if ((biome === 1 || biome === 2) && slope < 0.55 && palmMatrices.length < 3400) {
+      if ((biome === 1 || biome === 2) && slope < 0.55 && totalCoastalTrees < 3400) {
+        // Lagon de l'Ouest & Côte Ouest: Filaos, Cocotiers/Lataniers, Flamboyants, Vacoas & Tamarins on upper slopes
+        const roll = rand();
+        let species: ReunionTreeSpecies;
+        if (biome === 1) {
+          species = roll < 0.50 ? 'filao' : roll < 0.82 ? 'cocotier' : roll < 0.93 ? 'flamboyant' : 'vacoa';
+        } else {
+          species =
+            h > 52 && roll < 0.22
+              ? 'tamarin'
+              : roll < 0.44
+                ? 'filao'
+                : roll < 0.68
+                  ? 'flamboyant'
+                  : roll < 0.92
+                    ? 'cocotier'
+                    : 'vacoa';
+        }
+        const s = 0.82 + rand() * 0.72;
+        const sy = s * (0.9 + rand() * 0.28);
+        pushTreeInstance(species, s, sy, s);
+        totalCoastalTrees++;
+      } else if ((biome === 3 || biome === 4) && slope < 0.72 && totalInlandTrees < 6600) {
+        // Cirques (Salazie, Mafate, Cilaos) & Forêts des Hauts: Cryptomérias, Tamarins des Hauts, Fanjons & Flamboyants
+        const roll = rand();
+        let species: ReunionTreeSpecies;
+        if (biome === 3) {
+          species =
+            roll < 0.34
+              ? 'cryptomeria'
+              : roll < 0.62
+                ? 'fanjon'
+                : roll < 0.88
+                  ? 'tamarin'
+                  : h < 78
+                    ? 'flamboyant'
+                    : 'filao';
+        } else {
+          species =
+            roll < 0.42
+              ? 'tamarin'
+              : roll < 0.78
+                ? 'cryptomeria'
+                : roll < 0.94
+                  ? 'fanjon'
+                  : 'filao';
+        }
+        const s = 0.85 + rand() * 0.95;
+        const sy = s * (0.88 + rand() * 0.35);
+        pushTreeInstance(species, s, sy, s);
+        totalInlandTrees++;
+      } else if (biome === 8 && slope < 0.62 && totalCoastalTrees < 3700 && rand() < 0.48) {
+        // Sud Sauvage (Saint-Philippe / Cap Méchant / Grand Brûlé): Vacoas, Filaos & Cocotiers
+        const roll = rand();
+        const species: ReunionTreeSpecies =
+          roll < 0.52 ? 'vacoa' : roll < 0.82 ? 'filao' : roll < 0.94 ? 'cocotier' : 'flamboyant';
         const s = 0.85 + rand() * 0.75;
-        dummy.scale.set(s, s, s);
-        dummy.updateMatrix();
-        palmMatrices.push(dummy.matrix.clone());
-      } else if ((biome === 3 || biome === 4) && slope < 0.72 && treeMatrices.length < 6800) {
-        const s = 0.9 + rand() * 1.05;
-        dummy.scale.set(s, s * (0.9 + rand() * 0.45), s);
-        dummy.updateMatrix();
-        treeMatrices.push(dummy.matrix.clone());
+        pushTreeInstance(species, s, s * (0.9 + rand() * 0.25), s);
+        totalCoastalTrees++;
+      } else if (biome === 5 && h < 225 && slope < 0.60 && totalInlandTrees < 6900 && rand() < 0.24) {
+        // Subalpine Piton des Neiges approaches: wind-twisted Tamarins des Hauts & Cryptomérias
+        const species: ReunionTreeSpecies = rand() < 0.72 ? 'tamarin' : 'cryptomeria';
+        const s = 0.75 + rand() * 0.65;
+        pushTreeInstance(species, s, s * (0.78 + rand() * 0.25), s);
+        totalInlandTrees++;
       } else if ((biome >= 1 && biome <= 4) && slope < 0.62 && bushMatrices.length < 4500 && rand() < 0.65) {
         const s = 0.75 + rand() * 0.9;
         dummy.scale.set(s, s * 0.75, s);
@@ -778,9 +867,8 @@ export class ReunionWorldRenderer {
       }
     }
 
-    // Layered palms / filaos & cirque cryptomeria trees
-    this.addInstancedTrees(palmMatrices, 0x8b5a2b, 0x2e8b57, 4.9, 2.45);
-    this.addInstancedTrees(treeMatrices, 0x5c3a21, 0x1e6b3a, 3.8, 3.3);
+    // Render all 16 procedural Réunion tree archetypes (Filao, Cocotier, Flamboyant, Tamarin, Cryptoméria, Fanjon, Vacoa)
+    this.addProceduralTreeArchetypes(archetypes, treeInstancesByArch);
 
     // Lush bushes / ferns
     if (bushMatrices.length > 0) {
@@ -826,32 +914,46 @@ export class ReunionWorldRenderer {
     }
   }
 
-  private addInstancedTrees(matrices: THREE.Matrix4[], trunkCol: number, leafCol: number, trunkH: number, crownR: number): void {
-    if (matrices.length === 0) return;
-
-    const trunkGeo = new THREE.CylinderGeometry(0.22, 0.38, trunkH, 5);
-    trunkGeo.translate(0, trunkH * 0.5, 0);
-    const trunkMesh = new THREE.InstancedMesh(
-      trunkGeo,
-      new THREE.MeshStandardMaterial({ color: trunkCol, roughness: 0.9, flatShading: true }),
-      matrices.length,
-    );
-
-    const crownGeo = new THREE.ConeGeometry(crownR, crownR * 1.85, 6);
-    crownGeo.translate(0, trunkH + crownR * 0.65, 0);
-    const crownMesh = new THREE.InstancedMesh(
-      crownGeo,
-      new THREE.MeshStandardMaterial({ color: leafCol, roughness: 0.85, flatShading: true }),
-      matrices.length,
-    );
-
-    matrices.forEach((m, idx) => {
-      trunkMesh.setMatrixAt(idx, m);
-      crownMesh.setMatrixAt(idx, m);
+  private addProceduralTreeArchetypes(
+    archetypes: ProceduralTreeArchetype[],
+    instancesByArch: { matrix: THREE.Matrix4; woodTint: THREE.Color; leafTint: THREE.Color }[][],
+  ): void {
+    const woodMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.92,
+      metalness: 0.02,
+      flatShading: true,
     });
-    trunkMesh.instanceMatrix.needsUpdate = true;
-    crownMesh.instanceMatrix.needsUpdate = true;
-    this.scene.add(trunkMesh, crownMesh);
+    const foliageMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.84,
+      metalness: 0.02,
+      flatShading: true,
+      side: THREE.DoubleSide,
+    });
+
+    archetypes.forEach((arch, archIdx) => {
+      const instances = instancesByArch[archIdx];
+      if (!instances || instances.length === 0) return;
+
+      const woodMesh = new THREE.InstancedMesh(arch.woodGeo, woodMat, instances.length);
+      const foliageMesh = new THREE.InstancedMesh(arch.foliageGeo, foliageMat, instances.length);
+
+      for (let i = 0; i < instances.length; i++) {
+        const inst = instances[i];
+        woodMesh.setMatrixAt(i, inst.matrix);
+        woodMesh.setColorAt(i, inst.woodTint);
+        foliageMesh.setMatrixAt(i, inst.matrix);
+        foliageMesh.setColorAt(i, inst.leafTint);
+      }
+
+      woodMesh.instanceMatrix.needsUpdate = true;
+      if (woodMesh.instanceColor) woodMesh.instanceColor.needsUpdate = true;
+      foliageMesh.instanceMatrix.needsUpdate = true;
+      if (foliageMesh.instanceColor) foliageMesh.instanceColor.needsUpdate = true;
+
+      this.scene.add(woodMesh, foliageMesh);
+    });
   }
 
   private buildCoastalPiroguesAndFeatures(sampler: TerrainSampler, bossX: number, bossZ: number, hubX: number, hubZ: number): void {
