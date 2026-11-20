@@ -291,6 +291,7 @@ export interface SelfState {
   activeMountCode?: string | null;
   mountSpeedBonus?: number;
   mountCanFly?: boolean;
+  inSafeZone?: boolean;
 }
 
 export interface PublicPlayer {
@@ -334,6 +335,8 @@ export interface MonsterState {
   carapaceActive?: boolean;
   respawnRemaining?: number;
   aggressive: boolean;
+  nightEnraged?: boolean;
+  aggroRadius?: number;
   social?: boolean;
   fleeHpRatio?: number;
   hasCalledHelp?: boolean;

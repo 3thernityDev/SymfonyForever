@@ -24,6 +24,8 @@ final class WorldCatalog
     public const float MAX_WALKABLE_SLOPE = 1.35; // tan(~53 deg) — impassable steep remparts
     public const float PLAYER_WALK_SPEED = 6.0;
     public const float PLAYER_SPRINT_SPEED = 11.5;
+    public const float HUB_SAFE_RADIUS = 55.0;
+    public const float CHECKPOINT_SAFE_RADIUS = 48.0;
 
     public const int BIOME_OCEAN = 0;
     public const int BIOME_LAGOON_BEACH = 1;
@@ -225,5 +227,20 @@ final class WorldCatalog
             ),
             self::baseTrails(),
         );
+    }
+
+    /**
+     * Returns true when coordinates sit inside Saint-Gilles town hub or near any zone checkpoint/camp.
+     */
+    public static function isInSafeSanctuary(float $x, float $z): bool
+    {
+        foreach (self::zones() as $zone) {
+            $radius = ($zone['isSafeHub'] ?? false) ? self::HUB_SAFE_RADIUS : self::CHECKPOINT_SAFE_RADIUS;
+            if (hypot($x - $zone['respawnX'], $z - $zone['respawnZ']) <= $radius) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

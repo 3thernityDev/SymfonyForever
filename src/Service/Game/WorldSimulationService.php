@@ -8,9 +8,11 @@ use App\Entity\Character;
 use App\Entity\ChatMessage;
 use App\Entity\CombatEvent;
 use App\Entity\MonsterInstance;
+use App\Entity\MonsterTemplate;
 use App\Entity\Zone;
 use App\Game\CharacterClass;
 use App\Game\MonsterRespawnScaler;
+use App\Game\WorldCatalog;
 use App\Repository\CharacterRepository;
 use App\Repository\CombatEventRepository;
 use App\Repository\MonsterInstanceRepository;
@@ -37,6 +39,13 @@ final class WorldSimulationService
     public const float WORLD_BOSS_AOE_RADIUS = 26.0;
     public const float WORLD_BOSS_AOE_COOLDOWN_P1 = 7.0;
     public const float WORLD_BOSS_AOE_COOLDOWN_P2 = 5.5;
+    public const float NIGHT_AGGRO_MULTIPLIER = 2.0;
+    public const float NIGHT_MIN_AGGRO_RADIUS = 24.0;
+    public const float NIGHT_MAX_AGGRO_RADIUS = 42.0;
+    public const float NIGHT_LEASH_BONUS = 18.0;
+    public const float NIGHT_MOVE_SPEED_MULTIPLIER = 1.15;
+    public const float NIGHT_ATTACK_INTERVAL_MULTIPLIER = 0.85;
+    public const float AGGRO_MAX_VERTICAL_DIFF = 18.0;
 
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -49,7 +58,25 @@ final class WorldSimulationService
         private readonly ReunionTerrainService $terrainService,
         private readonly StatCalculator $statCalculator,
         private readonly CombatService $combatService,
+        private readonly WorldAtmosphereService $atmosphereService,
     ) {
+    }
+
+    public static function isMonsterAggressiveAt(MonsterTemplate $template, bool $isNight): bool
+    {
+        return $template->isAggressive() || $isNight;
+    }
+
+    public static function computeEffectiveAggroRadius(MonsterTemplate $template, bool $isNight): float
+    {
+        if (!$isNight) {
+            return $template->getAggroRadius();
+        }
+
+        return min(
+            self::NIGHT_MAX_AGGRO_RADIUS,
+            max(self::NIGHT_MIN_AGGRO_RADIUS, round($template->getAggroRadius() * self::NIGHT_AGGRO_MULTIPLIER, 2)),
+        );
     }
 
     public function maybeTickZone(string $zoneCode, ?float $now = null): bool
@@ -100,6 +127,7 @@ final class WorldSimulationService
                 static fn (Character $p): bool => !$p->isDead(),
             ));
             $activeRadiusSq = self::ACTIVE_MONSTER_SIM_RADIUS * self::ACTIVE_MONSTER_SIM_RADIUS;
+            $isNight = $this->atmosphereService->getCurrentAtmosphere($now)['isNight'];
 
             foreach ($monsters as $monster) {
                 if ($monster->getState() === MonsterInstance::STATE_IDLE && $monster->getActiveEffects() === []) {
@@ -119,7 +147,7 @@ final class WorldSimulationService
                     }
                 }
 
-                $this->tickMonster($monster, $playersById, $monstersById, $step, $now, $createdEvents);
+                $this->tickMonster($monster, $playersById, $monstersById, $step, $now, $createdEvents, $isNight);
             }
 
             // 3. Opportunistic cleanup of old combat events (> 35s) & expired ground loot
@@ -222,6 +250,7 @@ final class WorldSimulationService
         float $step,
         float $now,
         array &$createdEvents,
+        bool $isNight = false,
     ): void {
         $template = $monster->getTemplate();
 
@@ -348,13 +377,19 @@ final class WorldSimulationService
             }
         }
 
-        // Idle: check aggro radius if aggressive, else occasional idle wander
+        // Idle: check aggro radius if aggressive (boosted at night outside sanctuaries), else occasional idle wander
         if ($monster->getState() === MonsterInstance::STATE_IDLE) {
-            if ($template->isAggressive()) {
+            if (self::isMonsterAggressiveAt($template, $isNight)) {
                 $closest = null;
-                $bestDist = $template->getAggroRadius();
+                $bestDist = self::computeEffectiveAggroRadius($template, $isNight);
                 foreach ($playersById as $p) {
                     if ($p->isDead()) {
+                        continue;
+                    }
+                    if (WorldCatalog::isInSafeSanctuary($p->getPosX(), $p->getPosZ())) {
+                        continue;
+                    }
+                    if (abs($p->getPosY() - $monster->getPosY()) > self::AGGRO_MAX_VERTICAL_DIFF) {
                         continue;
                     }
                     $d = hypot($p->getPosX() - $monster->getPosX(), $p->getPosZ() - $monster->getPosZ());
@@ -403,11 +438,12 @@ final class WorldSimulationService
 
         // COMBAT / FLEEING state
         $distFromSpawn = hypot($monster->getPosX() - $monster->getSpawnX(), $monster->getPosZ() - $monster->getSpawnZ());
+        $baseLeash = self::LEASH_DISTANCE + ($isNight ? self::NIGHT_LEASH_BONUS : 0.0);
         $leash = $template->isWorldBoss()
             ? self::WORLD_BOSS_LEASH_DISTANCE
             : (($monster->getState() === MonsterInstance::STATE_FLEEING || $monster->hasCalledHelp())
-                ? max(self::LEASH_DISTANCE, $template->getCallHelpRadius() + 35.0)
-                : self::LEASH_DISTANCE);
+                ? max($baseLeash, $template->getCallHelpRadius() + 35.0)
+                : $baseLeash);
         $targetId = $monster->getTopThreatCharacterId($now);
         $target = ($targetId !== null && isset($playersById[$targetId])) ? $playersById[$targetId] : null;
 
@@ -598,11 +634,13 @@ final class WorldSimulationService
 
         $distTarget = hypot($target->getPosX() - $monster->getPosX(), $target->getPosZ() - $monster->getPosZ());
         if ($distTarget > $template->getAttackRange()) {
-            $this->moveTowards($monster, $target->getPosX(), $target->getPosZ(), $template->getMoveSpeed() * $step);
+            $chaseSpeed = $template->getMoveSpeed() * ($isNight ? self::NIGHT_MOVE_SPEED_MULTIPLIER : 1.0);
+            $this->moveTowards($monster, $target->getPosX(), $target->getPosZ(), $chaseSpeed * $step);
         } else {
             // Face target and attack if off cooldown
             $monster->setRotY(atan2($target->getPosX() - $monster->getPosX(), $target->getPosZ() - $monster->getPosZ()));
-            if (($now - $monster->getLastAttackAt()) >= $template->getAttackInterval()) {
+            $attackInterval = $template->getAttackInterval() * ($isNight ? self::NIGHT_ATTACK_INTERVAL_MULTIPLIER : 1.0);
+            if (($now - $monster->getLastAttackAt()) >= $attackInterval) {
                 $this->performMonsterAttack($monster, $target, $now, $createdEvents);
             }
         }

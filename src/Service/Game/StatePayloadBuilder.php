@@ -9,6 +9,7 @@ use App\Entity\MonsterInstance;
 use App\Entity\Party;
 use App\Game\ItemRegistry;
 use App\Game\SkillRegistry;
+use App\Game\WorldCatalog;
 
 final class StatePayloadBuilder
 {
@@ -110,6 +111,7 @@ final class StatePayloadBuilder
             'activeMountCode' => $mountDef?->code,
             'mountSpeedBonus' => $mountDef?->mountSpeedBonus ?? 0.0,
             'mountCanFly' => $mountDef?->mountCanFly ?? false,
+            'inSafeZone' => WorldCatalog::isInSafeSanctuary($c->getPosX(), $c->getPosZ()),
         ];
     }
 
@@ -144,7 +146,7 @@ final class StatePayloadBuilder
     /**
      * @return array<string, mixed>
      */
-    public function buildMonster(MonsterInstance $m, float $now): array
+    public function buildMonster(MonsterInstance $m, float $now, bool $isNight = false): array
     {
         $tpl = $m->getTemplate();
         $effects = [];
@@ -183,7 +185,9 @@ final class StatePayloadBuilder
             'participantCount' => $isWorldBoss ? max($activeEngaged, $m->getRaidContributorCount()) : $activeEngaged,
             'carapaceActive' => $isWorldBoss && $activeEngaged < WorldSimulationService::WORLD_BOSS_MIN_PLAYERS_NO_REGEN,
             'respawnRemaining' => $m->getState() === MonsterInstance::STATE_DEAD ? round(max(0.0, $m->getRespawnAt() - $now), 1) : 0.0,
-            'aggressive' => $tpl->isAggressive(),
+            'aggressive' => WorldSimulationService::isMonsterAggressiveAt($tpl, $isNight),
+            'nightEnraged' => $isNight,
+            'aggroRadius' => WorldSimulationService::computeEffectiveAggroRadius($tpl, $isNight),
             'social' => $tpl->isSocial(),
             'fleeHpRatio' => $tpl->getFleeHpRatio(),
             'hasCalledHelp' => $m->hasCalledHelp(),

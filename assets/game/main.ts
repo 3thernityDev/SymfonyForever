@@ -150,6 +150,7 @@ class SymfonyForeverGame {
   private targetType: 'MONSTER' | 'PLAYER' | null = null;
   private targetId: number | null = null;
   private lastTargetMonsterDistText = '';
+  private lastNightDangerToastShown = false;
 
   private activeChatTab: 'ZONE' | 'GLOBAL' | 'PARTY' | 'COMBAT' = 'ZONE';
   private readonly chatHistory: { channel: string; html: string }[] = [];
@@ -479,15 +480,30 @@ class SymfonyForeverGame {
         const baseLvl = `Niv. ${resp.zone.minLevel}–${resp.zone.maxLevel}`;
         const mult = typeof resp.respawnMultiplier === 'number' ? resp.respawnMultiplier : 1.0;
         const zCount = typeof resp.zonePlayerCount === 'number' ? resp.zonePlayerCount : 1;
+        const multText = mult > 1.0 ? mult.toFixed(2).replace(/\.?0+$/, '') : '';
+        const statusSuffix = resp.self.inSafeZone
+          ? ' · 🛡️ Zone sûre'
+          : resp.atmosphere?.isNight
+            ? ' · 🌙 Nuit hostile'
+            : '';
+
         if (mult > 1.0) {
-          const multText = mult.toFixed(2).replace(/\.?0+$/, '');
-          zSub.textContent = `${baseLvl} · Spawn ×${multText}`;
+          zSub.textContent = `${baseLvl} · Spawn ×${multText}${statusSuffix}`;
           zSub.title = `${zCount} joueurs dans la zone — réapparition accélérée (×${multText})`;
         } else {
-          zSub.textContent = baseLvl;
+          zSub.textContent = `${baseLvl}${statusSuffix}`;
           zSub.title = `${zCount} joueur dans la zone — réapparition normale (×1)`;
         }
       }
+    }
+
+    if (resp.atmosphere?.isNight && !resp.self.inSafeZone) {
+      if (!isFirst && !this.lastNightDangerToastShown) {
+        this.lastNightDangerToastShown = true;
+        this.showToast('🌙 Nuit hostile : hors des villages et checkpoints, les créatures vous attaquent de plus loin !');
+      }
+    } else {
+      this.lastNightDangerToastShown = false;
     }
 
     // Reconcile remote players
@@ -1626,6 +1642,8 @@ class SymfonyForeverGame {
         } else if (m.targetCharacterId !== null) {
           const holder = this.remotePlayers.get(m.targetCharacterId)?.state.name ?? `Joueur #${m.targetCharacterId}`;
           aggroEl.textContent = `🛡️ Aggro sur : ${holder}${socialSuffix}`;
+        } else if (m.nightEnraged) {
+          aggroEl.textContent = `🌙 Hostile (Nuit · aggro ${Math.round(m.aggroRadius ?? 24)} m)${socialSuffix}`;
         } else {
           const baseAggro = m.aggressive ? '⚠️ Hostile' : 'Pacifique jusqu\'à attaque';
           aggroEl.textContent = `${baseAggro}${socialSuffix}`;

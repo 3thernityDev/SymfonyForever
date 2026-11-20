@@ -186,6 +186,8 @@ final class WorldSyncController extends AbstractController
 
         $zonePlayerCount = max(1, $characterRepository->countOnlineInZone($zoneCode, $now));
         $respawnMultiplier = MonsterRespawnScaler::computeSpeedMultiplier($zonePlayerCount);
+        $atmosphere = $atmosphereService->getCurrentAtmosphere($now);
+        $isNight = $atmosphere['isNight'];
 
         return $this->json([
             'serverTime' => round($now, 3),
@@ -193,7 +195,7 @@ final class WorldSyncController extends AbstractController
             'onlineCount' => $characterRepository->countOnline($now),
             'zonePlayerCount' => $zonePlayerCount,
             'respawnMultiplier' => $respawnMultiplier,
-            'atmosphere' => $atmosphereService->getCurrentAtmosphere($now),
+            'atmosphere' => $atmosphere,
             'self' => $payloadBuilder->buildSelf($character, $now),
             'zone' => WorldCatalog::zones()[$zoneCode] ?? WorldCatalog::zones()['lagon_ouest'],
             'players' => array_map(
@@ -201,7 +203,7 @@ final class WorldSyncController extends AbstractController
                 $nearbyPlayers,
             ),
             'monsters' => array_map(
-                static fn ($m): array => $payloadBuilder->buildMonster($m, $now),
+                static fn ($m): array => $payloadBuilder->buildMonster($m, $now, $isNight),
                 $nearbyMonsters,
             ),
             'events' => array_map(static fn ($e): array => $e->toArray(), $events),

@@ -18,6 +18,7 @@ use App\Repository\MonsterTemplateRepository;
 use App\Service\Game\CombatService;
 use App\Service\Game\ReunionTerrainService;
 use App\Service\Game\StatCalculator;
+use App\Service\Game\WorldAtmosphereService;
 use App\Service\Game\WorldSeederService;
 use App\Service\Game\WorldSimulationService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -742,5 +743,120 @@ final class CombatAndSimulationTest extends KernelTestCase
         $this->em->flush();
         $this->sim->maybeTickZone('salazie', $now + 16.5);
         self::assertSame(MonsterInstance::STATE_COMBAT, $isolated->getState());
+    }
+
+    public function testNightMakesAllMobsMoreAggressiveFromAfarExceptInsideTownsAndCheckpoints(): void
+    {
+        $zones = WorldCatalog::zones();
+        $lagon = $zones['lagon_ouest'];
+        $cilaos = $zones['cilaos'];
+
+        // 1. Safe sanctuary boundary helper checks (town <= 55m, checkpoint <= 48m, wild false)
+        self::assertTrue(WorldCatalog::isInSafeSanctuary($lagon['respawnX'], $lagon['respawnZ']));
+        self::assertTrue(WorldCatalog::isInSafeSanctuary($lagon['respawnX'] + 54.0, $lagon['respawnZ']));
+        self::assertFalse(WorldCatalog::isInSafeSanctuary($lagon['respawnX'] + 65.0, $lagon['respawnZ']));
+
+        self::assertTrue(WorldCatalog::isInSafeSanctuary($cilaos['respawnX'], $cilaos['respawnZ']));
+        self::assertTrue(WorldCatalog::isInSafeSanctuary($cilaos['respawnX'] + 47.0, $cilaos['respawnZ']));
+        self::assertFalse(WorldCatalog::isInSafeSanctuary($cilaos['respawnX'] + 55.0, $cilaos['respawnZ']));
+
+        $passiveTpl = (new MonsterTemplate('night_passive', 'Crabe Nocturne'))
+            ->setLevel(1)->setMaxHp(200)->setAttack(8)->setDefense(2)->setXpReward(25)
+            ->setAggroRadius(10.0)->setAggressive(false);
+        $aggressiveTpl = (new MonsterTemplate('night_hunter', 'Guêpe Chasseresse'))
+            ->setLevel(5)->setMaxHp(260)->setAttack(12)->setDefense(4)->setXpReward(40)
+            ->setAggroRadius(15.0)->setAggressive(true);
+        $this->em->persist($passiveTpl);
+        $this->em->persist($aggressiveTpl);
+
+        // 2. Pure aggro & effective radius checks (day vs night)
+        self::assertFalse(WorldSimulationService::isMonsterAggressiveAt($passiveTpl, false));
+        self::assertTrue(WorldSimulationService::isMonsterAggressiveAt($passiveTpl, true));
+        self::assertTrue(WorldSimulationService::isMonsterAggressiveAt($aggressiveTpl, false));
+        self::assertTrue(WorldSimulationService::isMonsterAggressiveAt($aggressiveTpl, true));
+
+        self::assertSame(10.0, WorldSimulationService::computeEffectiveAggroRadius($passiveTpl, false));
+        self::assertSame(24.0, WorldSimulationService::computeEffectiveAggroRadius($passiveTpl, true));
+        self::assertSame(15.0, WorldSimulationService::computeEffectiveAggroRadius($aggressiveTpl, false));
+        self::assertSame(30.0, WorldSimulationService::computeEffectiveAggroRadius($aggressiveTpl, true));
+
+        // 3. Setup wild & sanctuary actors during frozen DAY (12:30)
+        $now = 50000.0;
+        $atmoService = self::getContainer()->get(WorldAtmosphereService::class);
+        $dayAtmo = $atmoService->applyChanges(null, false, 12.5, false, true, $now);
+        self::assertFalse($dayAtmo['isNight']);
+
+        $lagonZone = (new Zone('lagon_ouest', 'Lagon'))->setLastTickAt($now - 5.0);
+        $cilaosZone = (new Zone('cilaos', 'Cilaos'))->setLastTickAt($now - 5.0);
+        $this->em->persist($lagonZone);
+        $this->em->persist($cilaosZone);
+
+        $user = (new User())->setUsername('night_tester')->setEmail('night@reunion.re')->setPassword('hash');
+        $this->em->persist($user);
+
+        $wildX = $lagon['respawnX'] + 120.0;
+        $wildZ = $lagon['respawnZ'];
+        self::assertFalse(WorldCatalog::isInSafeSanctuary($wildX, $wildZ));
+
+        $wildPlayer = (new Character($user, 'Explorateur', CharacterClass::DPS))
+            ->setLevel(10)->setZoneCode('lagon_ouest')
+            ->setPosX($wildX)->setPosY(12.0)->setPosZ($wildZ)
+            ->setLastSeenAt($now);
+        $townPlayer = (new Character($user, 'Citadin', CharacterClass::DPS))
+            ->setLevel(10)->setZoneCode('lagon_ouest')
+            ->setPosX($lagon['respawnX'])->setPosY(12.0)->setPosZ($lagon['respawnZ'])
+            ->setLastSeenAt($now);
+        $checkpointPlayer = (new Character($user, 'VoyageurCilaos', CharacterClass::DPS))
+            ->setLevel(30)->setZoneCode('cilaos')
+            ->setPosX($cilaos['respawnX'] + 20.0)->setPosY(60.0)->setPosZ($cilaos['respawnZ'])
+            ->setLastSeenAt($now);
+
+        foreach ([$wildPlayer, $townPlayer, $checkpointPlayer] as $ch) {
+            $s = $this->stats->compute($ch, $now);
+            $ch->setCurrentHp($s['maxHp'])->setCurrentMp($s['maxMp']);
+            $this->em->persist($ch);
+        }
+
+        // Wild mobs placed 22m from wildPlayer (outside daytime 10m/15m aggro, inside nighttime 24m/30m)
+        $wildPassive = new MonsterInstance($passiveTpl, 'lagon_ouest', $wildX + 22.0, 12.0, $wildZ);
+        $wildAggressive = new MonsterInstance($aggressiveTpl, 'lagon_ouest', $wildX - 22.0, 12.0, $wildZ);
+
+        // Aggressive mobs placed 12m from Saint-Gilles town player & Cilaos checkpoint player
+        $townGuardTarget = new MonsterInstance($aggressiveTpl, 'lagon_ouest', $lagon['respawnX'] + 12.0, 12.0, $lagon['respawnZ']);
+        $cilaosGuardTarget = new MonsterInstance($aggressiveTpl, 'cilaos', $cilaos['respawnX'] + 32.0, 60.0, $cilaos['respawnZ']);
+
+        foreach ([$wildPassive, $wildAggressive, $townGuardTarget, $cilaosGuardTarget] as $m) {
+            $this->em->persist($m);
+        }
+        $this->em->flush();
+
+        // Day tick: neither passive nor aggressive mob pulls wildPlayer at 22m
+        $this->sim->maybeTickZone('lagon_ouest', $now);
+        self::assertSame(MonsterInstance::STATE_IDLE, $wildPassive->getState());
+        self::assertSame(MonsterInstance::STATE_IDLE, $wildAggressive->getState());
+        self::assertSame(MonsterInstance::STATE_IDLE, $townGuardTarget->getState());
+
+        // 4. Switch server clock to frozen NIGHT (23:00)
+        $tNight = $now + 3.0;
+        $nightAtmo = $atmoService->applyChanges(null, false, 23.0, false, true, $tNight);
+        self::assertTrue($nightAtmo['isNight']);
+
+        $wildPlayer->setLastSeenAt($tNight);
+        $townPlayer->setLastSeenAt($tNight);
+        $checkpointPlayer->setLastSeenAt($tNight);
+        $this->em->flush();
+
+        $this->sim->maybeTickZone('lagon_ouest', $tNight);
+        $this->sim->maybeTickZone('cilaos', $tNight);
+
+        // Wild mobs BOTH auto-aggro wildPlayer from 22m at night!
+        self::assertSame(MonsterInstance::STATE_COMBAT, $wildPassive->getState(), 'Un mob passif doit devenir agressif la nuit.');
+        self::assertSame($wildPlayer->getId(), $wildPassive->getTopThreatCharacterId($tNight));
+        self::assertSame(MonsterInstance::STATE_COMBAT, $wildAggressive->getState(), 'Un mob agressif doit aggro de plus loin la nuit (22m < 30m).');
+        self::assertSame($wildPlayer->getId(), $wildAggressive->getTopThreatCharacterId($tNight));
+
+        // Players inside town (Saint-Gilles) or near a checkpoint (Cilaos) remain completely safe from auto-aggro!
+        self::assertSame(MonsterInstance::STATE_IDLE, $townGuardTarget->getState(), 'Un joueur en ville ne doit pas être attaqué automatiquement la nuit.');
+        self::assertSame(MonsterInstance::STATE_IDLE, $cilaosGuardTarget->getState(), 'Un joueur proche d\'un checkpoint ne doit pas être attaqué automatiquement la nuit.');
     }
 }
